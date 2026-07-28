@@ -1,0 +1,57 @@
+# Unity-generated folders (recreated automatically)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# IDE and operating-system files
+.vs/
+.vscode/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.DS_Store
+Thumbs.db
+
+# Local Codex/validation artifacts
+.claude/
+.codex_validation/
+.codex-video-frames/
+ProfilerCaptures/
+GeneratedAssets/
+tmp/
+
+# Local captures and disposable exports stored at project root
+/*.png
+/*.log
+
+# Imported source archives and documentation are not required to open the game
+Assets/**/*.unitypackage
+Assets/**/*.zip
+Assets/**/*.7z
+
+# Unity downloads this package from the version declared in Packages/manifest.json
+Packages/com.unity.ai.assistant/
+
+# Crash and build artifacts
+sysinfo.txt
+*.apk
+*.aab
+*.app
+*.unity3d
+

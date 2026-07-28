@@ -1,0 +1,112 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &7791896015933941957
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7548756368867814904}
+  m_Layer: 0
+  m_Name: DiamondEnhancer
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7548756368867814904
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7791896015933941957}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 1208105723561007802}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1001 &1679478431831899473
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 7548756368867814904}
+    m_Modifications:
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalScale.x
+      value: 39.491188
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalScale.y
+      value: 39.491188
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalScale.z
+      value: 39.491188
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: -0.00036845237
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0.37463352
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0.0002971746
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 14cb2b9f56a6cfd46bd15fb45a09ba48, type: 2}
+    - target: {fileID: 919132149155446097, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+      propertyPath: m_Name
+      value: Meshy_AI_Crea_un_diamante_low__0711184725_texture
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+--- !u!4 &1208105723561007802 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: e5fa4db586b71f941ab53edc202976a3, type: 3}
+  m_PrefabInstance: {fileID: 1679478431831899473}
+  m_PrefabAsset: {fileID: 0}

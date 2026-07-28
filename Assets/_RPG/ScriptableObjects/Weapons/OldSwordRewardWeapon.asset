@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 90207b7104e4b5748a13fc12b8e08c90, type: 3}
+  m_Name: OldSwordRewardWeapon
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponID: forgotten_old_sword
+  weaponName: Espada Vieja
+  weaponType: 1
+  weaponPrefab: {fileID: 5324231070254951798, guid: 11e8a7646c90f4345ad6567bf8c00ae6, type: 3}
+  useCustomEquippedVisual: 0
+  customHandPositionOffset: {x: 0.11, y: 0.06, z: 0.09}
+  customHandRotationOffset: {x: 289.52, y: 32.8, z: 107.87}
+  customGripAnchorPercent: 0.16
+  customMaxEquippedWeaponSize: 1.45
+  hasIntrinsicGlow: 0
+  intrinsicGlowColor: {r: 0, g: 1, b: 1, a: 1}
+  intrinsicGlowStrength: 0
+  invertGripAxis: 0
+  useVertexGripAnchor: 0
+  baseDamage: 20
+  attackRange: 1.55
+  attackCooldown: 0.6
+  animatorOverride: {fileID: 0}
+  swingSound: {fileID: 0}
+  hitSound: {fileID: 0}
+  drawSound: {fileID: 0}

@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 164cac5be25588b4097ed35a72eaa573, type: 3}
+  m_Name: HealthPotion
+  m_EditorClassIdentifier: Assembly-CSharp::ItemData
+  itemID: health_potion
+  itemName: Pocion de Salud
+  itemType: 7
+  icon: {fileID: 21300000, guid: 5472823e4dd798b45a48929912cc4cd6, type: 3}
+  description: Restaura 30 puntos de salud al instante.
+  attackBonus: 0
+  defenseBonus: 0
+  speedBonus: 0
+  healAmount: 30
+  staminaCostReductionPercent: 0
+  staminaRegenBoostPercent: 0
+  buffDuration: 30
+  stackable: 1
+  maxStack: 10
+  weaponData: {fileID: 0}
+  equipmentPrefab: {fileID: 0}
+  equipmentBone: 0
+  equipmentPositionOffset: {x: 0, y: 0, z: 0}
+  equipmentRotationOffset: {x: 0, y: 0, z: 0}
+  equipmentScale: {x: 1, y: 1, z: 1}
+  centerVisualOnBone: 0
+  tintColor: {r: 1, g: 1, b: 1, a: 1}

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: ab4059f525d7caf4f875c1b5debf9360
+timeCreated: 1538140966
+licenseType: Store
+NativeFormatImporter:
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 129599
+  packageName: Goblins -characters with animations
+  packageVersion: 2.0
+  assetPath: Assets/Goblins -characters with animations/Goblins -characters with
+    animations/models/prefab/goblin.prefab
+  uploadId: 633882
