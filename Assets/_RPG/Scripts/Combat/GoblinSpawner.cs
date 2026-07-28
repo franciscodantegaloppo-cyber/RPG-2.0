@@ -35,6 +35,8 @@ public class GoblinSpawner : MonoBehaviour
     Terrain terrain;
     bool prefabsResolved;
     bool nightSpawnBoost;
+    bool bloodMoonSpawnBoost;
+    Transform bloodMoonFollowTarget;
 
     static readonly string[] FallbackPrefabPaths =
     {
@@ -53,6 +55,9 @@ public class GoblinSpawner : MonoBehaviour
 
     void Update()
     {
+        if (bloodMoonFollowTarget != null)
+            transform.position = bloodMoonFollowTarget.position;
+
         if (!activated)
         {
             if (!AllInitialGoblinsDead())
@@ -67,7 +72,10 @@ public class GoblinSpawner : MonoBehaviour
         if (Time.time < activationTime || Time.time < nextSpawnTime)
             return;
 
-        nextSpawnTime = Time.time + spawnInterval / (nightSpawnBoost ? 2.4f : 1f);
+        float frequencyMultiplier = bloodMoonSpawnBoost
+            ? 4.5f
+            : nightSpawnBoost ? 2.4f : 1f;
+        nextSpawnTime = Time.time + spawnInterval / frequencyMultiplier;
         TrySpawn();
     }
 
@@ -89,7 +97,10 @@ public class GoblinSpawner : MonoBehaviour
         ResolvePrefabsIfNeeded();
         if (goblinPrefabs == null || goblinPrefabs.Length == 0)
             return;
-        if (CountGoblinsInRadius() >= maxGoblinsInRadius * (nightSpawnBoost ? 2 : 1))
+        int populationMultiplier = bloodMoonSpawnBoost
+            ? 3
+            : nightSpawnBoost ? 2 : 1;
+        if (CountGoblinsInRadius() >= maxGoblinsInRadius * populationMultiplier)
             return;
 
         Vector3 position = FindFlatSpawnPosition();
@@ -100,12 +111,54 @@ public class GoblinSpawner : MonoBehaviour
 
         if (eliteChance > 0f && Random.value < eliteChance)
             MakeElite(instance);
-        else if (pinkGoblinEvery > 0 && spawnedCount % pinkGoblinEvery == 0)
+        // The elite roll always happens first and keeps the exact normal spawner chance.
+        // During a Blood Moon most non-elites are pink, without turning elites pink or
+        // modifying their established rarity.
+        else if (bloodMoonSpawnBoost ? Random.value < .78f :
+                 pinkGoblinEvery > 0 && spawnedCount % pinkGoblinEvery == 0)
             MakePink(instance);
         NightEnemyEventManager.Instance?.ApplySpawnModifiers(instance);
     }
 
     public void SetNightSpawnBoost(bool enabled) => nightSpawnBoost = enabled;
+
+    public void SetBloodMoonSpawnBoost(bool enabled)
+    {
+        bloodMoonSpawnBoost = enabled;
+        if (enabled)
+            nextSpawnTime = Mathf.Min(nextSpawnTime,
+                Time.time + Random.Range(.35f, 1.2f));
+    }
+
+    // Creates a lightweight runtime spawner using the exact same prefabs and elite settings.
+    // This is used for the village/player pressure of the Blood Moon and destroyed afterwards.
+    public GoblinSpawner CreateBloodMoonSatellite(string objectName,
+        Vector3 centre, Transform followTarget, float radius, int localBaseCap)
+    {
+        ResolvePrefabsIfNeeded();
+        if (goblinPrefabs == null || goblinPrefabs.Length == 0)
+            return null;
+
+        GameObject root = new GameObject(objectName);
+        root.transform.position = centre;
+        GoblinSpawner satellite = root.AddComponent<GoblinSpawner>();
+        satellite.requireInitialGoblinsDefeated = false;
+        satellite.initialGoblins = null;
+        satellite.activationDelay = 0f;
+        satellite.goblinPrefabs = goblinPrefabs;
+        satellite.spawnRadius = Mathf.Max(8f, radius);
+        satellite.maxGoblinsInRadius = Mathf.Max(3, localBaseCap);
+        satellite.spawnInterval = Mathf.Max(2.5f, spawnInterval);
+        satellite.pinkGoblinEvery = pinkGoblinEvery;
+        satellite.pinkTint = pinkTint;
+        satellite.eliteChance = eliteChance;
+        satellite.eliteStatMultiplier = eliteStatMultiplier;
+        satellite.eliteTint = eliteTint;
+        satellite.eliteStarHeight = eliteStarHeight;
+        satellite.bloodMoonFollowTarget = followTarget;
+        satellite.SetBloodMoonSpawnBoost(true);
+        return satellite;
+    }
 
     Vector3 FindFlatSpawnPosition()
     {
