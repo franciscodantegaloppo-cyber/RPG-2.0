@@ -23,6 +23,8 @@ public class CombatSystem : MonoBehaviour
     WeaponSocket weaponSocket;
     PlayerWaterBreathing waterBreathing;
     PlayerSpellCaster spellCaster;
+    WeaponDrawSystem weaponDrawSystem;
+    PlayerController playerController;
 
     // Unarmed attacks cycle through all 6 actions (L1,L2,L3,R1,R2,R3)
     // Sword cycles through up to 11 attacks
@@ -35,6 +37,8 @@ public class CombatSystem : MonoBehaviour
     bool attackLocked;
     bool activeAttackHasSword;
     bool slashPlayedForAttack;
+    bool activeAttackHitProcessed;
+    int attackSequence;
 
     // Lets WeaponSocket know when a swing animation is playing so it can stop forcing the
     // weapon's rest orientation and let it follow the hand bone's real animated rotation.
@@ -68,6 +72,8 @@ public class CombatSystem : MonoBehaviour
         weaponSocket = GetComponent<WeaponSocket>();
         waterBreathing = GetComponent<PlayerWaterBreathing>();
         spellCaster = GetComponent<PlayerSpellCaster>();
+        weaponDrawSystem = GetComponent<WeaponDrawSystem>();
+        playerController = GetComponent<PlayerController>();
 
         int enemyLayer = LayerMask.NameToLayer("Enemy");
         if (enemyLayer >= 0)
@@ -97,6 +103,13 @@ public class CombatSystem : MonoBehaviour
 
     void PerformAttack()
     {
+        if (weaponSocket != null && weaponSocket.HasWeaponEquipped())
+        {
+            if (weaponDrawSystem == null)
+                weaponDrawSystem = GetComponent<WeaponDrawSystem>();
+            weaponDrawSystem?.EnsureWeaponInHandImmediate();
+        }
+
         // Reset combo if too much time passed since last hit
         if (Time.time - lastAttackTime >
             comboWindow / Mathf.Max(0.01f, ActionSpeedMultiplier * WeaponAttackSpeedMultiplier))
@@ -108,9 +121,24 @@ public class CombatSystem : MonoBehaviour
         activeSwordAction = action;
         activeAttackHasSword = hasSword;
         slashPlayedForAttack = false;
+        activeAttackHitProcessed = false;
+        attackSequence++;
 
         stats.DrainStamina(attackStaminaCost);
-        animBridge?.TriggerAttack(action, WeaponAttackSpeedMultiplier);
+        bool movingSwordAttack = hasSword && playerController != null &&
+                                 playerController.IsMoving &&
+                                 playerController.IsGrounded;
+        animBridge?.TriggerAttack(action, WeaponAttackSpeedMultiplier,
+            movingSwordAttack);
+        weaponDrawSystem?.NotifyWeaponUsed();
+
+        if (movingSwordAttack)
+        {
+            float hitDelay = .32f / Mathf.Max(.1f,
+                ActionSpeedMultiplier * WeaponAttackSpeedMultiplier);
+            StartCoroutine(ProcessMovingAttackHitAfterDelay(
+                attackSequence, hitDelay));
+        }
 
         var weapon = weaponSocket?.GetCurrentWeapon();
         AudioManager.Instance?.PlaySFX(weapon?.GetSwingSound());
@@ -144,8 +172,19 @@ public class CombatSystem : MonoBehaviour
         attackLocked = false;
     }
 
+    IEnumerator ProcessMovingAttackHitAfterDelay(int sequence, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (sequence == attackSequence && !activeAttackHitProcessed)
+            ProcessAttackHit();
+    }
+
     public void ProcessAttackHit()
     {
+        if (activeAttackHitProcessed)
+            return;
+        activeAttackHitProcessed = true;
+
         ItemInstance weaponInstance = EquipmentManager.Instance?.GetEquippedInstance(ItemType.Weapon);
         float rangePct = weaponInstance?.GetAffixValue(AffixType.WeaponRangePercent) ?? 0f;
         float rangeMultiplier = 1f + rangePct / 100f;

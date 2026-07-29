@@ -24,6 +24,7 @@ public class NPCHerrero : MonoBehaviour, IInteractable
             wander = gameObject.AddComponent<NPCWander>();
 
         wander.Configure(speed: 0.75f, radius: 5f, step: 2.1f, minWait: 2.5f, maxWait: 5.5f);
+        wander.ConfigureReturnToSpawnChance(0.9f);
         ApplyBlacksmithIdentity();
     }
 

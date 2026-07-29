@@ -16,8 +16,12 @@ public class GroundSnapOnStart : MonoBehaviour
     public void SnapNow()
     {
         Vector3 position = transform.position;
-        float groundY = GroundUtility.GetGroundY(position, transform);
-        if (float.IsNegativeInfinity(groundY))
+        NPCWander wander = GetComponent<NPCWander>();
+        float groundY;
+        bool hasGround = wander != null
+            ? wander.TryGetSafeGroundY(position, out groundY)
+            : TryTerrainGround(position, out groundY);
+        if (!hasGround)
             return;
 
         float bottomOffset = GetBottomOffset();
@@ -32,6 +36,24 @@ public class GroundSnapOnStart : MonoBehaviour
 
         if (controllerWasEnabled)
             controller.enabled = true;
+    }
+
+    static bool TryTerrainGround(Vector3 position, out float groundY)
+    {
+        foreach (Terrain terrain in Terrain.activeTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null)
+                continue;
+            Vector3 local = position - terrain.transform.position;
+            Vector3 size = terrain.terrainData.size;
+            if (local.x < 0f || local.z < 0f ||
+                local.x > size.x || local.z > size.z)
+                continue;
+            groundY = terrain.SampleHeight(position) + terrain.transform.position.y;
+            return true;
+        }
+        groundY = float.NegativeInfinity;
+        return false;
     }
 
     public void UseVisualFooting(float offset)

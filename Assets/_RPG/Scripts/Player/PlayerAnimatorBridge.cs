@@ -30,6 +30,8 @@ public class PlayerAnimatorBridge : MonoBehaviour
     WeaponSocket weaponSocket;
     GanzPlayerVisual ganzVisual;
     PlayerSpellAnimationPlayer spellAnimations;
+    PlayerRpgAnimationPackController rpgAnimationPack;
+    WeaponDrawSystem weaponDrawSystem;
 
     // GanzPlayerVisual (when equipment is worn) puts up a second, fully separate Animator
     // instance on the visible skinned character. Sharing the same RuntimeAnimatorController
@@ -53,9 +55,15 @@ public class PlayerAnimatorBridge : MonoBehaviour
         weaponSocket = GetComponent<WeaponSocket>();
         ganzVisual   = GetComponent<GanzPlayerVisual>();
         spellAnimations = GetComponent<PlayerSpellAnimationPlayer>();
-        equippedWeaponType = weaponSocket != null && weaponSocket.HasWeaponEquipped()
+        rpgAnimationPack = GetComponent<PlayerRpgAnimationPackController>();
+        weaponDrawSystem = GetComponent<WeaponDrawSystem>();
+        // An equipped sword can physically be on the back. Locomotion must follow
+        // where the weapon really is, not merely whether the inventory slot is occupied.
+        equippedWeaponType = weaponSocket != null &&
+                             weaponSocket.HasWeaponEquipped() &&
+                             !weaponSocket.IsCarriedOnBack
             ? 1
-            : (anim.GetInteger(HashWeapon) == 0 ? 0 : 1);
+            : 0;
         anim.SetFloat(HashAnimSpeed, 1f);
     }
 
@@ -106,12 +114,13 @@ public class PlayerAnimatorBridge : MonoBehaviour
         // "true" if the player was mid-stride) into the Animator for as long as the menu stayed
         // open. That's why the character's walk animation looked stuck the instant a dialogue
         // opened. Force idle here instead of trusting the now-stale controller state.
-        bool gameplayActive = GameManager.Instance != null && GameManager.Instance.IsGameplayActive();
+        bool gameplayActive = GameManager.Instance == null ||
+                              GameManager.Instance.IsGameplayActive();
         bool moving = gameplayActive && controller.IsMoving;
         if (waterBreathing == null) waterBreathing = GetComponent<PlayerWaterBreathing>();
         float playback = waterBreathing != null ? waterBreathing.ActionSpeedMultiplier : 1f;
         if (moving)
-            playback *= stats != null ? stats.MoveSpeedMultiplier : 1f;
+            playback *= controller.MecanimLocomotionPlaybackScale;
         playback = Mathf.Clamp(playback, .45f, 3f);
         foreach (Animator target in Targets()) target.speed = playback;
         SetBool(HashMoving, moving);
@@ -145,15 +154,28 @@ public class PlayerAnimatorBridge : MonoBehaviour
         if (spellAnimations == null) spellAnimations = GetComponent<PlayerSpellAnimationPlayer>();
         bool actionActive = (combat != null && combat.IsAttacking) ||
                             (spellAnimations != null && spellAnimations.IsPlaying);
-        bool canRelax = equippedWeaponType == 0 &&
+        bool weaponInHands = weaponSocket != null &&
+                             weaponSocket.HasWeaponEquipped() &&
+                             !weaponSocket.IsCarriedOnBack;
+        bool combatProfile = weaponDrawSystem != null
+            ? weaponDrawSystem.IsCombatProfileActive
+            : weaponInHands;
+        if (rpgAnimationPack == null)
+            rpgAnimationPack = GetComponent<PlayerRpgAnimationPackController>();
+        bool canRelax = rpgAnimationPack != null &&
+                        rpgAnimationPack.UsePeacefulLocomotion &&
+                        !combatProfile &&
+                        !weaponInHands &&
                         (stats == null || !stats.IsDead) &&
-                        controller.IsGrounded &&
-                        !actionActive;
+                        controller.IsGrounded && !actionActive;
         if (canRelax)
         {
             if (relaxedIdleEligibleSince < 0f)
                 relaxedIdleEligibleSince = Time.time;
             if (Time.time - relaxedIdleEligibleSince >= RelaxedIdleDelay)
+                // The unarmed locomotion set has loose shoulders and arms down.
+                // Keep the equipped sword visual untouched; only select the
+                // peaceful body language while no hostile is nearby.
                 ApplyWeaponAnimatorType(0);
         }
         else
@@ -167,13 +189,25 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // ── Attack ───────────────────────────────────────────────────────
     // unarmed: Action 1-6  (L1,L2,L3,R1,R2,R3)
     // sword:   Action 1-11
-    public void TriggerAttack(int actionIndex, float speedMultiplier = 1f)
+    public void TriggerAttack(int actionIndex, float speedMultiplier = 1f,
+        bool preserveLowerBody = false)
     {
+        ReleaseRelaxedPose();
         // Restore the actual weapon state before firing the attack transition. Standing idle may
         // intentionally be using the relaxed unarmed pose, but a sword attack still needs the
         // controller's complete 2H animation set.
         relaxedIdleEligibleSince = -1f;
         ApplyWeaponAnimatorType(equippedWeaponType);
+        if (preserveLowerBody)
+        {
+            if (rpgAnimationPack == null)
+                rpgAnimationPack =
+                    GetComponent<PlayerRpgAnimationPackController>();
+            if (rpgAnimationPack != null &&
+                rpgAnimationPack.PlayMovingSwordAttack(
+                    actionIndex, speedMultiplier))
+                return;
+        }
         attackAnimationSpeed = Mathf.Max(.1f, speedMultiplier);
         SetFloat(HashAnimSpeed, attackAnimationSpeed);
         if (resetAttackSpeed != null) StopCoroutine(resetAttackSpeed);
@@ -205,6 +239,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // hitType: 1=Front1 2=Front2 3=Back 4=Left 5=Right  (HitType enum)
     public void TriggerGetHit(int hitType = 1)
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 12); // GetHitTrigger
         SetInteger(HashAction, hitType);
         SetTrigger(HashTrigger);
@@ -232,6 +267,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // knockbackType: 1 or 2
     public void TriggerKnockback(int knockbackType = 1)
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 26); // KnockbackTrigger
         SetInteger(HashAction, knockbackType);
         SetTrigger(HashTrigger);
@@ -239,19 +275,27 @@ public class PlayerAnimatorBridge : MonoBehaviour
     }
 
     // ── Knockdown + auto Getup ────────────────────────────────────────
-    public void TriggerKnockdown()
+    public void TriggerKnockdown(bool autoGetup = true)
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 27); // KnockdownTrigger
         SetInteger(HashAction, 1);
         SetTrigger(HashTrigger);
         StartCoroutine(ResetTriggerNumber());
-        StartCoroutine(AutoGetup(2.5f));
+        if (autoGetup)
+            StartCoroutine(AutoGetup(2.5f));
     }
 
     IEnumerator AutoGetup(float delay)
     {
         yield return new WaitForSeconds(delay);
-        // Getup: trigger ActionTrigger (2) with Action=0, or just return to idle
+        TriggerGetup();
+    }
+
+    public void TriggerGetup()
+    {
+        ReleaseRelaxedPose();
+        // Getup: trigger ActionTrigger (2) with Action=0.
         SetInteger(HashTriggerNumber, 2); // ActionTrigger (returns to idle)
         SetInteger(HashAction, 0);
         SetTrigger(HashTrigger);
@@ -261,6 +305,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // ── Dodge/DiveRoll ────────────────────────────────────────────────
     public void TriggerDiveRoll()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 28); // DiveRollTrigger
         SetInteger(HashAction, 1);         // DiveRoll1
         SetTrigger(HashTrigger);
@@ -270,6 +315,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // ── Weapon Sheath/Draw ────────────────────────────────────────────
     public void TriggerWeaponSheath()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 15); // WeaponSheathTrigger
         SetTrigger(HashTrigger);
         StartCoroutine(ResetTriggerNumber());
@@ -277,6 +323,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
 
     public void TriggerWeaponUnsheath()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 16); // WeaponUnsheathTrigger
         SetTrigger(HashTrigger);
         StartCoroutine(ResetTriggerNumber());
@@ -285,6 +332,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // ── Jump / Fall / Land ────────────────────────────────────────────
     public void TriggerJump()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 18);
         SetInteger(HashJumping, 1);
         SetTrigger(HashTrigger);
@@ -293,6 +341,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
 
     public void TriggerFall()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 18);
         SetInteger(HashJumping, 2);
         SetTrigger(HashTrigger);
@@ -301,6 +350,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
 
     public void TriggerLand()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 18);
         SetInteger(HashJumping, 0);
         SetTrigger(HashTrigger);
@@ -322,6 +372,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
     // ── Death / Revive ────────────────────────────────────────────────
     public void TriggerDeath()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 20); // DeathTrigger
         SetTrigger(HashTrigger);
         StartCoroutine(ResetTriggerNumber());
@@ -329,6 +380,7 @@ public class PlayerAnimatorBridge : MonoBehaviour
 
     public void TriggerRevive()
     {
+        ReleaseRelaxedPose();
         SetInteger(HashTriggerNumber, 21); // ReviveTrigger
         SetTrigger(HashTrigger);
         StartCoroutine(ResetTriggerNumber());
@@ -350,6 +402,13 @@ public class PlayerAnimatorBridge : MonoBehaviour
     }
 
     public void SetMoveParams(float speed) { }
+
+    void ReleaseRelaxedPose()
+    {
+        if (rpgAnimationPack == null)
+            rpgAnimationPack = GetComponent<PlayerRpgAnimationPackController>();
+        rpgAnimationPack?.ReleaseRelaxedPoseForAction();
+    }
 
     // ── Animation event receivers ─────────────────────────────────────
     void Hit()          => combat?.ProcessAttackHit();

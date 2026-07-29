@@ -13,6 +13,7 @@ public class OldManDialogue : MonoBehaviour, IInteractable
     };
 
     NPCWander wander;
+    System.Action missionSevenCompletion;
 
     void Awake()
     {
@@ -29,8 +30,22 @@ public class OldManDialogue : MonoBehaviour, IInteractable
 
     public void Interact(PlayerInteraction player)
     {
+        BeginStory(player != null ? player.transform : null);
+    }
+
+    public void BeginMissionSevenStory(Transform player,
+        System.Action onCompleted = null)
+    {
+        missionSevenCompletion = onCompleted;
+        BeginStory(player);
+    }
+
+    void BeginStory(Transform player)
+    {
         wander?.PauseForInteraction();
-        Vector3 direction = player.transform.position - transform.position;
+        Vector3 direction = player != null
+            ? player.position - transform.position
+            : transform.forward;
         direction.y = 0f;
         if (direction.sqrMagnitude > .01f) transform.rotation = Quaternion.LookRotation(direction);
 
@@ -52,8 +67,12 @@ public class OldManDialogue : MonoBehaviour, IInteractable
 
     void EndConversation()
     {
+        MerchantDialoguePanel.EnsureRuntime()?.Hide();
         OldManFireballCombat combat = GetComponent<OldManFireballCombat>();
         if (combat == null || !combat.HasTarget) wander?.ResumeWander();
+        System.Action completed = missionSevenCompletion;
+        missionSevenCompletion = null;
+        completed?.Invoke();
     }
 
     void EnsureInteractionTrigger()

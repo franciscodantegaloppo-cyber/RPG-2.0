@@ -12,6 +12,7 @@ public class NPCMeleeDefender : MonoBehaviour
     [SerializeField] WeaponData weaponDataTemplate;
     [SerializeField] GameObject weaponPrefab;
     [SerializeField] WeaponType weaponType = WeaponType.Sword1H;
+    [SerializeField, Range(1, 11)] int swordAttackAction = 7;
 
     static readonly int HashTrigger = Animator.StringToHash("Trigger");
     static readonly int HashTriggerNumber = Animator.StringToHash("TriggerNumber");
@@ -27,6 +28,7 @@ public class NPCMeleeDefender : MonoBehaviour
     EnemyStats target;
     RuntimeAnimatorController peacefulController;
     WeaponData runtimeWeapon;
+    TonioHouseRoutine tonioHouseRoutine;
     float nextScan;
     float nextAttack;
     bool fighting;
@@ -34,20 +36,28 @@ public class NPCMeleeDefender : MonoBehaviour
 
     void Awake()
     {
+#if UNITY_EDITOR
+        EnsureEditorBlacksmithDefaults();
+#endif
         wander = GetComponent<NPCWander>();
         animator = GetComponentInChildren<Animator>(true);
         socket = GetComponent<WeaponSocket>();
         if (socket == null) socket = gameObject.AddComponent<WeaponSocket>();
+        tonioHouseRoutine = GetComponent<TonioHouseRoutine>();
         if (animator != null) peacefulController = animator.runtimeAnimatorController;
         BuildRuntimeWeapon();
     }
 
     void Start()
     {
+        if (tonioHouseRoutine == null)
+            tonioHouseRoutine = GetComponent<TonioHouseRoutine>();
+
         // NPCWander selects the relaxed unarmed controller in Awake. Cache it after every
         // Awake has completed so a previously serialized combat pose cannot become permanent.
         if (animator != null)
             peacefulController = animator.runtimeAnimatorController;
+        EnsureNpcWeapon();
         RestoreRelaxedPose();
     }
 
@@ -55,6 +65,17 @@ public class NPCMeleeDefender : MonoBehaviour
 
     void Update()
     {
+        // Tonio must remain a peaceful quest giver while sheltered inside his house.
+        // Do this before scanning so nearby enemies cannot interrupt his indoor route,
+        // equip his weapon or leave him stuck in a combat pose.
+        if (tonioHouseRoutine != null &&
+            (tonioHouseRoutine.IsInsideHouse || tonioHouseRoutine.IsRouteActive))
+        {
+            target = null;
+            LeaveCombat();
+            return;
+        }
+
         if (Time.time >= nextScan)
         {
             nextScan = Time.time + .28f;
@@ -125,9 +146,15 @@ public class NPCMeleeDefender : MonoBehaviour
         if (fighting) return;
         fighting = true;
         wander?.PauseForInteraction();
-        socket?.DetachWeapon();
-        SetInt(HashWeapon, 0);
-        SetInt(HashRightWeapon, 0);
+        EnsureNpcWeapon();
+        if (animator != null && combatController != null)
+            animator.runtimeAnimatorController = combatController;
+        SetInt(HashWeapon, weaponType == WeaponType.Sword2H ? 2 : 1);
+        SetInt(HashRightWeapon, 1);
+        SetInt(HashTriggerNumber, 16); // WeaponUnsheathTrigger
+        if (HasParameter(HashTrigger, AnimatorControllerParameterType.Trigger))
+            animator.SetTrigger(HashTrigger);
+        socket?.AnimateWeaponToHand(.44f);
     }
 
     void LeaveCombat()
@@ -138,7 +165,6 @@ public class NPCMeleeDefender : MonoBehaviour
         target = null;
         StopAllCoroutines();
         wander?.StopCombatMove();
-        socket?.DetachWeapon();
         RestoreRelaxedPose();
         wander?.ResumeWander();
     }
@@ -152,36 +178,49 @@ public class NPCMeleeDefender : MonoBehaviour
         if (animator != null && combatController != null)
             animator.runtimeAnimatorController = combatController;
 
-        // Prefer the NPC-specific prefab. This prevents a stale shared WeaponData reference
-        // from making the blacksmith or Nahue display Tonio's/King Goblin's sword.
-        WeaponData weapon = weaponPrefab != null ? runtimeWeapon : weaponDataTemplate;
-        if (weapon != null && weapon.weaponPrefab != null)
+        EnsureNpcWeapon();
+        if (socket != null &&
+            (socket.IsCarriedOnBack || socket.IsCarryTransitioning))
         {
-            socket.AttachWeapon(weapon.weaponPrefab, weapon);
-            socket.SetAnimationDrivenGrip(true);
+            socket.AnimateWeaponToHand(.38f);
+            yield return new WaitForSeconds(.4f);
         }
+        socket?.ShowWeapon();
+        socket?.SetAnimationDrivenGrip(true);
 
         SetInt(HashWeapon, weaponType == WeaponType.Sword2H ? 2 : 1);
         SetInt(HashRightWeapon, 1);
-        SetInt(HashAction, 7);
+        SetInt(HashAction, swordAttackAction);
         SetInt(HashSide, 2);
         SetInt(HashTriggerNumber, 4);
-        if (HasParameter(HashTrigger, AnimatorControllerParameterType.Trigger))
+        bool triggered =
+            HasParameter(HashTrigger, AnimatorControllerParameterType.Trigger);
+        if (triggered)
             animator.SetTrigger(HashTrigger);
+        // The controller normally reaches this state through TriggerNumber=4.
+        // A direct cross-fade makes the blacksmith's two-handed swing reliable
+        // even when its previous peaceful controller was swapped this frame.
+        if (weaponType == WeaponType.Sword2H)
+            CrossFadeIfPresent("2Hand-Sword-Attack" +
+                               swordAttackAction, .08f);
         yield return new WaitForSeconds(.42f);
         if (IsValidTarget(attacked) &&
             Vector3.Distance(transform.position, attacked.transform.position) <= attackRange + .35f)
             attacked.TakeDamage(attackDamage, transform.position);
 
         yield return new WaitForSeconds(.48f);
-        socket?.DetachWeapon();
-        RestoreRelaxedPose();
+        socket?.SetAnimationDrivenGrip(false);
+        SetInt(HashTriggerNumber, 2); // Return to the armed idle.
+        if (HasParameter(HashTrigger, AnimatorControllerParameterType.Trigger))
+            animator.SetTrigger(HashTrigger);
         attacking = false;
     }
 
     void RestoreRelaxedPose()
     {
-        socket?.DetachWeapon();
+        EnsureNpcWeapon();
+        socket?.SetAnimationDrivenGrip(false);
+        socket?.AnimateWeaponToBack(.46f);
         if (animator == null)
             return;
 
@@ -193,6 +232,17 @@ public class NPCMeleeDefender : MonoBehaviour
         int idle = Animator.StringToHash("Idle");
         if (animator.layerCount > 0 && animator.HasState(0, idle))
             animator.CrossFade(idle, .16f);
+    }
+
+    void EnsureNpcWeapon()
+    {
+        if (socket == null || socket.HasWeaponEquipped())
+            return;
+        // Prefer the NPC-specific prefab. This prevents a stale shared
+        // WeaponData reference from showing another NPC's sword.
+        WeaponData weapon = weaponPrefab != null ? runtimeWeapon : weaponDataTemplate;
+        if (weapon != null && weapon.weaponPrefab != null)
+            socket.AttachWeapon(weapon.weaponPrefab, weapon);
     }
 
     void BuildRuntimeWeapon()
@@ -225,4 +275,31 @@ public class NPCMeleeDefender : MonoBehaviour
     {
         if (HasParameter(hash, AnimatorControllerParameterType.Float)) animator.SetFloat(hash, value);
     }
+
+    void CrossFadeIfPresent(string stateName, float duration)
+    {
+        if (animator == null || animator.runtimeAnimatorController == null)
+            return;
+        int shortHash = Animator.StringToHash(stateName);
+        if (animator.HasState(0, shortHash))
+            animator.CrossFade(shortHash, duration, 0, 0f);
+    }
+
+#if UNITY_EDITOR
+    void EnsureEditorBlacksmithDefaults()
+    {
+        if (GetComponent<NPCHerrero>() == null)
+            return;
+        if (combatController == null)
+            combatController =
+                UnityEditor.AssetDatabase.LoadAssetAtPath
+                    <RuntimeAnimatorController>(
+                    "Assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animation Controller/RPG-Character-Animation-Controller.controller");
+        if (weaponPrefab == null)
+            weaponPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/URP GanzSe Free Modular Character Pack/Prefabs/GREAT SWORDS/FREE GREAT SWORD 4 COLOR 1.prefab");
+        weaponType = WeaponType.Sword2H;
+        swordAttackAction = 7;
+    }
+#endif
 }

@@ -43,6 +43,25 @@ public static class FantasySkyboxDayNightSetup
         CopyRuntimeMaterial("FS017_Night");
         CopyRuntimeMaterial("FS017_Night_Moonless");
 
+        // Tenkoku's built-in sky renderer targets the Standard pipeline and continuously writes
+        // a very low exposure into the currently assigned skybox. Under URP it remains useful as
+        // a time/astronomy data source, but its visual component must not compete with FantasySky.
+        if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null)
+        {
+            foreach (MonoBehaviour component in
+                     Object.FindObjectsByType<MonoBehaviour>(
+                         FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (component == null ||
+                    component.GetType().Name != "TenkokuModule" ||
+                    !component.enabled)
+                    continue;
+                component.enabled = false;
+                EditorUtility.SetDirty(component);
+                changed = true;
+            }
+        }
+
         // Apply the daytime panorama in Edit Mode too. Previously the material was only set
         // after pressing Play, while the scene camera remained Solid Color from the mountain
         // generator and hid all of the imported Fantasy Skybox clouds in the editor.

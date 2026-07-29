@@ -108,8 +108,10 @@ public static class WaterFountainSetup
         SphereCollider trigger = interaction.AddComponent<SphereCollider>();
         trigger.isTrigger = true;
         trigger.center = root.transform.InverseTransformPoint(interactionBounds.center);
+        // Only a thin shell around the solid fountain is needed. The interactable itself
+        // also validates real collider contact, so the prompt cannot appear from afar.
         trigger.radius = Mathf.Max(interactionBounds.extents.x,
-            interactionBounds.extents.z) + 1.25f;
+            interactionBounds.extents.z) + 0.12f;
 
         SetStaticRecursively(root);
         GameObject saved = PrefabUtility.SaveAsPrefabAsset(root, GeneratedPrefabPath);

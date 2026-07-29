@@ -7,6 +7,8 @@ public class PlayerController : MonoBehaviour
     [Header("Movement")]
     [SerializeField] float walkSpeed = 3f;
     [SerializeField] float runSpeed = 6f;
+    [SerializeField, Range(.75f, 2.25f)]
+    float peacefulWalkAnimationCalibration = 1.45f;
     [SerializeField] float movementAcceleration = 24f;
     [SerializeField] float movementDeceleration = 34f;
     [SerializeField] float jumpHeight = 3.5f;
@@ -53,6 +55,41 @@ public class PlayerController : MonoBehaviour
     public bool IsGrounded => isGrounded;
     public Vector3 MoveDirection { get; private set; }
     public Vector3 CurrentPlanarMotion => planarMotion;
+    public float CurrentPlanarSpeed => planarMotion.magnitude;
+
+    // HumanM@Run01 is also used as the peaceful, arms-down walk cycle.
+    // At the normal 3 m/s walk it looks correct around 0.58 playback speed.
+    // Deriving its speed from the real CharacterController motion keeps the
+    // feet synchronized during acceleration, braking, sprint and speed bonuses.
+    public float PeacefulLocomotionPlaybackSpeed
+    {
+        get
+        {
+            float relativeToWalk =
+                CurrentPlanarSpeed / Mathf.Max(.1f, walkSpeed);
+            return Mathf.Clamp(.58f * relativeToWalk, .16f, 4f);
+        }
+    }
+
+    public float PeacefulWalkPlaybackSpeed =>
+        Mathf.Clamp(peacefulWalkAnimationCalibration *
+            CurrentPlanarSpeed / Mathf.Max(.1f, walkSpeed), .2f, 3f);
+
+    public float PeacefulRunPlaybackSpeed =>
+        Mathf.Clamp(CurrentPlanarSpeed / Mathf.Max(.1f, runSpeed), .2f, 3f);
+
+    // The Mecanim controller is authored for walkSpeed/runSpeed at speed 1.
+    // This ratio includes acceleration and deceleration, rather than jumping
+    // immediately to the final stat multiplier while the body is still gaining speed.
+    public float MecanimLocomotionPlaybackScale
+    {
+        get
+        {
+            float reference = IsSprinting ? runSpeed : walkSpeed;
+            return Mathf.Clamp(CurrentPlanarSpeed /
+                Mathf.Max(.1f, reference), .2f, 3f);
+        }
+    }
 
     public void ResetAfterRespawn()
     {
@@ -61,7 +98,7 @@ public class PlayerController : MonoBehaviour
         isGrounded = false;
         isJumping = false;
         hasFallTriggered = false;
-        landAnimationCleared = false;
+        landAnimationCleared = true;
         trackingFallHeight = false;
         onTooSteepSlope = false;
         lastSteepSlopeContactTime = -10f;
@@ -82,6 +119,10 @@ public class PlayerController : MonoBehaviour
 
         if (cameraTransform == null && Camera.main != null)
             cameraTransform = Camera.main.transform;
+
+        // The player starts standing on the ground. Beginning with this false made the
+        // first terrain contact fire a landing transition even though no jump occurred.
+        landAnimationCleared = true;
     }
 
     void Update()
@@ -187,7 +228,8 @@ public class PlayerController : MonoBehaviour
         if (velocity.y > 0f)
             velocity.y = -2f;
 
-        if (!landAnimationCleared)
+        bool completedRealJump = isJumping || hasFallTriggered;
+        if (!landAnimationCleared && completedRealJump)
         {
             animBridge?.TriggerLand();
         }

@@ -15,6 +15,21 @@ public static class ImportedStatusEffectsSetup
     static void Queue()
     {
         EditorApplication.delayCall += TryRun;
+        EditorApplication.delayCall += EnsureMissionSevenDarkAura;
+    }
+
+    static void EnsureMissionSevenDarkAura()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+        const string destination =
+            VfxDestination + "/DarkAura.prefab";
+        if (AssetDatabase.LoadMainAssetAtPath(destination) != null)
+            return;
+        EnsurePath(VfxDestination);
+        CopyAsset(PrefabFolder + "Debuff_03_Aura.prefab",
+            destination);
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
     }
 
     static void TryRun()

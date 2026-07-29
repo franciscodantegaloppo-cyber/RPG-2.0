@@ -4,12 +4,18 @@ public sealed class HealingFountainInteractable : MonoBehaviour, IInteractable
 {
     const int UsesPerDay = 3;
 
+    [SerializeField, Min(0.05f)] float contactTolerance = 0.3f;
+
     TenkokuDayNightCycle dayNightCycle;
+    Collider[] fountainColliders;
+    PlayerInteraction cachedPlayer;
+    Collider cachedPlayerCollider;
     int trackedWorldDay = int.MinValue;
     int usesToday;
 
     void Awake()
     {
+        fountainColliders = GetComponentsInChildren<Collider>(true);
         FindClock();
         RefreshDay();
     }
@@ -25,7 +31,40 @@ public sealed class HealingFountainInteractable : MonoBehaviour, IInteractable
 
     public bool CanInteract(PlayerInteraction player)
     {
-        return player != null;
+        if (player == null) return false;
+
+        Collider playerCollider = ResolvePlayerCollider(player);
+        Vector3 playerReference = playerCollider != null
+            ? playerCollider.bounds.center
+            : player.transform.position + Vector3.up * 0.9f;
+
+        foreach (Collider fountainCollider in fountainColliders)
+        {
+            if (fountainCollider == null || !fountainCollider.enabled ||
+                fountainCollider.isTrigger)
+                continue;
+
+            Vector3 pointOnFountain = SafeClosestPoint(
+                fountainCollider, playerReference);
+            Vector3 pointOnPlayer = playerCollider != null
+                ? SafeClosestPoint(playerCollider, pointOnFountain)
+                : playerReference;
+            if ((pointOnFountain - pointOnPlayer).sqrMagnitude <=
+                contactTolerance * contactTolerance)
+                return true;
+        }
+        return false;
+    }
+
+    static Vector3 SafeClosestPoint(Collider collider, Vector3 position)
+    {
+        // Unity throws when ClosestPoint is called on a non-convex MeshCollider.
+        // The fountain's detailed collision mesh is intentionally non-convex, so its bounds
+        // provide a stable contact test without expanding the interaction radius.
+        MeshCollider mesh = collider as MeshCollider;
+        return mesh != null && !mesh.convex
+            ? collider.bounds.ClosestPoint(position)
+            : collider.ClosestPoint(position);
     }
 
     public void Interact(PlayerInteraction player)
@@ -59,6 +98,20 @@ public sealed class HealingFountainInteractable : MonoBehaviour, IInteractable
     void FindClock()
     {
         dayNightCycle = FindAnyObjectByType<TenkokuDayNightCycle>();
+    }
+
+    Collider ResolvePlayerCollider(PlayerInteraction player)
+    {
+        if (cachedPlayer == player && cachedPlayerCollider != null)
+            return cachedPlayerCollider;
+
+        cachedPlayer = player;
+        cachedPlayerCollider = player.GetComponent<CharacterController>();
+        if (cachedPlayerCollider == null)
+            cachedPlayerCollider = player.GetComponent<Collider>();
+        if (cachedPlayerCollider == null)
+            cachedPlayerCollider = player.GetComponentInChildren<CapsuleCollider>();
+        return cachedPlayerCollider;
     }
 
     void RefreshDay()

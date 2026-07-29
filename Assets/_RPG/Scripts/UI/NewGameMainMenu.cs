@@ -142,14 +142,14 @@ public sealed class NewGameMainMenu : MonoBehaviour
             typeof(RectTransform), typeof(RawImage), typeof(NewGameKingGoblinPortrait));
         goblinPortrait.transform.SetParent(canvas.transform, false);
         RectTransform portraitRect = goblinPortrait.GetComponent<RectTransform>();
-        // The 3D character projects around the centre-right of the camera. Reserve the far-right
-        // column exclusively for the King's head instead of drawing it behind the player.
-        SetRect(portraitRect, new Vector2(.765f, .43f), new Vector2(.998f, .985f));
+        // Large background portrait: its own camera now centres the face, while this rect keeps
+        // the King behind and to the right of the playable character without clipping his head.
+        SetRect(portraitRect, new Vector2(.50f, .12f), new Vector2(.998f, .995f));
         RawImage portraitImage = goblinPortrait.GetComponent<RawImage>();
         portraitImage.raycastTarget = false;
 
         Image vignette = ImageObject(canvas.transform, "Vignette",
-            new Color(.015f, .008f, .018f, .54f), Vector2.zero, Vector2.one);
+            new Color(.015f, .008f, .018f, .40f), Vector2.zero, Vector2.one);
         vignette.raycastTarget = false;
 
         TextMeshProUGUI title = Text(canvas.transform, "Title",

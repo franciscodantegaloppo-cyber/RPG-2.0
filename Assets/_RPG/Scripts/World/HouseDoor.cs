@@ -18,24 +18,39 @@ public class HouseDoor : MonoBehaviour, IInteractable
     bool isOpen;
     bool isAnimating;
 
+    public bool IsOpen => isOpen;
+    public bool IsAnimating => isAnimating;
+
     public string GetInteractionText() => isOpen ? "[E] Cerrar puerta" : "[E] Abrir puerta";
     public bool CanInteract(PlayerInteraction player) => !isAnimating;
 
     public void Interact(PlayerInteraction player)
     {
         if (isAnimating) return;
-        StartCoroutine(AnimateDoor());
+        StartCoroutine(AnimateDoor(!isOpen));
     }
 
-    IEnumerator AnimateDoor()
+    public void OpenForNpc()
+    {
+        if (!isOpen && !isAnimating)
+            StartCoroutine(AnimateDoor(true));
+    }
+
+    public void CloseForNpc()
+    {
+        if (isOpen && !isAnimating)
+            StartCoroutine(AnimateDoor(false));
+    }
+
+    IEnumerator AnimateDoor(bool opening)
     {
         isAnimating = true;
-        AudioManager.Instance?.PlaySFX(isOpen ? closeSound : openSound);
+        AudioManager.Instance?.PlaySFX(opening ? openSound : closeSound);
 
         // Hinge point fijo en espacio mundo al inicio del giro
         Vector3 hingeWorld = transform.TransformPoint(new Vector3(hingeOffsetX, 0f, 0f));
 
-        float targetAngle = isOpen ? -openAngle : openAngle;
+        float targetAngle = opening ? openAngle : -openAngle;
         float elapsed = 0f;
         float rotated = 0f;
 
@@ -50,7 +65,7 @@ public class HouseDoor : MonoBehaviour, IInteractable
             yield return null;
         }
 
-        isOpen = !isOpen;
+        isOpen = opening;
         isAnimating = false;
     }
 

@@ -107,6 +107,7 @@ public class GoblinSpawner : MonoBehaviour
 
         GameObject prefab = goblinPrefabs[Random.Range(0, goblinPrefabs.Length)];
         GameObject instance = Instantiate(prefab, position, Quaternion.Euler(0f, Random.Range(0f, 360f), 0f));
+        SpawnedEnemyLifetimeLimiter.Ensure(instance, transform.position);
         spawnedCount++;
 
         if (eliteChance > 0f && Random.value < eliteChance)

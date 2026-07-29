@@ -5,14 +5,24 @@ public class TonioQuestGiver : MonoBehaviour, IInteractable
     [Header("Identidad")]
     [SerializeField] string npcName = "Tonio";
     NPCWander wander;
+    TonioHouseRoutine houseRoutine;
 
     void Awake()
     {
         wander = GetComponent<NPCWander>();
         if (wander == null) wander = gameObject.AddComponent<NPCWander>();
         ConfigureIndoorController();
-        wander.Configure(speed: .45f, radius: 1.25f, step: .65f, minWait: 3.5f, maxWait: 7f);
+        wander.Configure(speed: .45f, radius: .75f, step: .45f, minWait: 3.5f, maxWait: 7f);
+        wander.ConfigureReturnToSpawnChance(1f);
+        // The generated interior floor is a walkable trigger, not a solid physical floor.
+        // CharacterController gravity therefore sinks Tonio between ground corrections.
+        // Keep the proven ground-projected movement and disable random wandering: the dedicated
+        // house routine is now the only system allowed to move him.
         wander.UseTransformMovement(true);
+        wander.SetMoving(false);
+        houseRoutine = GetComponent<TonioHouseRoutine>();
+        if (houseRoutine == null)
+            houseRoutine = gameObject.AddComponent<TonioHouseRoutine>();
         EnsureInteractionTrigger();
         QuestNpcAttentionIcon icon = GetComponent<QuestNpcAttentionIcon>();
         if (icon == null) icon = gameObject.AddComponent<QuestNpcAttentionIcon>();
@@ -20,7 +30,8 @@ public class TonioQuestGiver : MonoBehaviour, IInteractable
     }
 
     public string GetInteractionText() => "[E] Hablar con " + npcName;
-    public bool CanInteract(PlayerInteraction player) => true;
+    public bool CanInteract(PlayerInteraction player) =>
+        houseRoutine == null || !houseRoutine.IsRouteActive;
 
     public void Interact(PlayerInteraction player)
     {

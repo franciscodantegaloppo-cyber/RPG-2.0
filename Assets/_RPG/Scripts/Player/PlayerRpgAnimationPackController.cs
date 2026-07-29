@@ -14,6 +14,14 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
     const string BlockHit = "OneHand_Up_Shield_Block_Hit_1_InPlace";
     const string CrouchIdle = "1Hand_Up_Crouch_Idle_1";
     const string CrouchMove = "1Hand_Up_Crouch_F_InPlace";
+    const string RelaxedIdle = "HumanM@Idle01";
+    const string RelaxedIdleVariationA = "HumanM@Idle02";
+    const string RelaxedIdleVariationB = "HumanM@Idle03";
+    // Walking and running intentionally use different leg cycles. The slow sword
+    // walk supplies a real heel-to-toe step, while a relaxed idle upper-body layer
+    // replaces its armed arms. Sprint keeps HumanM's natural full-body run.
+    const string RelaxedWalk = "2Hand-Sword-Walk-Slow";
+    const string RelaxedRun = "HumanM@Run01_Forward";
 
     readonly List<Animator> animators = new List<Animator>(2);
     readonly List<Animator> controlledAnimators = new List<Animator>(2);
@@ -21,11 +29,19 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
         new List<AnimatorControllerPlayable>(2);
     readonly List<AnimationClipPlayable> clipPlayables =
         new List<AnimationClipPlayable>(2);
+    readonly List<AnimationLayerMixerPlayable> layerMixers =
+        new List<AnimationLayerMixerPlayable>(2);
+    readonly List<AnimationClipPlayable> movingAttackLocomotionPlayables =
+        new List<AnimationClipPlayable>(2);
 
     RpgAnimationPackCatalog catalog;
     PlayerDefenseController defense;
     PlayerController movement;
     PlayerSpellAnimationPlayer spellAnimations;
+    PlayerStats stats;
+    CombatSystem combat;
+    WeaponSocket weaponSocket;
+    WeaponDrawSystem weaponDrawSystem;
     PlayableGraph graph;
     AvatarMask upperBodyMask;
     GameObject shieldVisual;
@@ -35,10 +51,43 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
     int actionCycle;
     int dialogueCycle;
     string currentClipName;
+    float nextRelaxedVariationAt;
+    float nextThreatScan;
+    float lastThreatSeenAt = -10f;
+    float overlayWeight = 1f;
+    float overlayTargetWeight = 1f;
+    float overlayFadeSpeed = 20f;
+    bool destroyAfterFade;
+    bool threatNearby;
+    bool movingAttackUsesRun;
 
     public bool IsCrouching { get; private set; }
     public bool IsPlaying => graph.IsValid() && graph.IsPlaying();
     public float MovementMultiplier => IsCrouching ? .48f : 1f;
+    public bool ThreatNearby => threatNearby;
+    public bool UsePeacefulLocomotion
+    {
+        get
+        {
+            bool gameplay = GameManager.Instance == null ||
+                            GameManager.Instance.IsGameplayActive();
+            bool actionBusy = (combat != null && combat.IsAttacking) ||
+                              (spellAnimations != null && spellAnimations.IsPlaying) ||
+                              (stats != null &&
+                               (stats.IsDead || stats.IsRolling || stats.IsKnockedDown));
+            bool weaponInHands = weaponSocket != null &&
+                                 weaponSocket.HasWeaponEquipped() &&
+                                 !weaponSocket.IsCarriedOnBack;
+            bool combatProfile = weaponDrawSystem != null
+                ? weaponDrawSystem.IsCombatProfileActive
+                : weaponInHands;
+            return gameplay && !threatNearby && !combatProfile &&
+                   !weaponInHands &&
+                   !IsCrouching &&
+                   (defense == null || !defense.IsGuarding) && !actionBusy &&
+                   movement != null && movement.IsGrounded;
+        }
+    }
 
     void Awake()
     {
@@ -46,6 +95,10 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
         defense = GetComponent<PlayerDefenseController>();
         movement = GetComponent<PlayerController>();
         spellAnimations = GetComponent<PlayerSpellAnimationPlayer>();
+        stats = GetComponent<PlayerStats>();
+        combat = GetComponent<CombatSystem>();
+        weaponSocket = GetComponent<WeaponSocket>();
+        weaponDrawSystem = GetComponent<WeaponDrawSystem>();
         EnsureShield();
     }
 
@@ -55,6 +108,8 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
                         GameManager.Instance.IsGameplayActive();
         if (!gameplay || RuntimeChatConsole.IsTyping)
             return;
+
+        UpdateThreatAwareness();
 
         if (spellAnimations == null)
             spellAnimations = GetComponent<PlayerSpellAnimationPlayer>();
@@ -95,11 +150,37 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
                 : CrouchIdle;
             if (currentClipName != wanted)
                 PlayNamed(wanted, true, false);
+            return;
         }
+
+        UpdateRelaxedIdle(guarding);
     }
 
     void LateUpdate()
     {
+        UpdateRelaxedLocomotionSpeed();
+        UpdateMovingAttackLocomotion();
+
+        if (graph.IsValid() &&
+            !Mathf.Approximately(overlayWeight, overlayTargetWeight))
+        {
+            overlayWeight = Mathf.MoveTowards(overlayWeight,
+                overlayTargetWeight, overlayFadeSpeed * Time.deltaTime);
+            foreach (AnimationLayerMixerPlayable mixer in layerMixers)
+                if (mixer.IsValid())
+                {
+                    mixer.SetInputWeight(1, overlayWeight);
+                    if (mixer.GetInputCount() > 2)
+                        mixer.SetInputWeight(2, overlayWeight);
+                }
+
+            if (destroyAfterFade && overlayWeight <= .001f)
+            {
+                StopPlayback();
+                return;
+            }
+        }
+
         int count = Mathf.Min(controlledAnimators.Count,
             controllerPlayables.Count);
         for (int i = 0; i < count; i++)
@@ -107,6 +188,16 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
                 controllerPlayables[i].IsValid())
                 CopyParameters(controlledAnimators[i],
                     controllerPlayables[i]);
+
+        foreach (AnimationClipPlayable playable in
+                 movingAttackLocomotionPlayables)
+        {
+            if (!playable.IsValid()) continue;
+            AnimationClip clip = playable.GetAnimationClip();
+            if (clip != null && clip.length > .01f &&
+                playable.GetTime() >= clip.length)
+                playable.SetTime(playable.GetTime() % clip.length);
+        }
 
         if (!looping) return;
         foreach (AnimationClipPlayable playable in clipPlayables)
@@ -234,7 +325,146 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
             PlayNamed(movement != null && movement.IsMoving
                 ? CrouchMove : CrouchIdle, true, false);
         else
+            UpdateRelaxedIdle(false);
+    }
+
+    void UpdateRelaxedIdle(bool guarding)
+    {
+        bool shouldRelax = !guarding && UsePeacefulLocomotion;
+
+        if (!shouldRelax)
+        {
+            FadeOutRelaxedPose(.32f);
+            return;
+        }
+
+        if (movement.IsMoving)
+        {
+            string wanted = movement.IsSprinting ? RelaxedRun : RelaxedWalk;
+            if (currentClipName != wanted)
+                PlayNamed(wanted, true, false);
+        }
+        else if (currentClipName != RelaxedIdle &&
+                 currentClipName != RelaxedIdleVariationA &&
+                 currentClipName != RelaxedIdleVariationB)
+        {
+            PlayNamed(RelaxedIdle, true, false);
+            ScheduleRelaxedVariation();
+        }
+
+        if (IsRelaxedClip(currentClipName) && graph.IsValid())
+        {
+            // If the player stopped again while the relaxed pose was fading
+            // away, reverse that same blend instead of destroying/recreating
+            // the graph. This prevents a visible snap at very short stops.
+            overlayTargetWeight = 1f;
+            overlayFadeSpeed = 1f / .28f;
+            destroyAfterFade = false;
+        }
+
+        if (!IsRelaxedClip(currentClipName))
+        {
+            if (graph.IsValid())
+                return;
+            PlayNamed(RelaxedIdle, true, false);
+            ScheduleRelaxedVariation();
+            return;
+        }
+
+        if (!movement.IsMoving && currentClipName == RelaxedIdle &&
+            Time.time >= nextRelaxedVariationAt)
+        {
+            PlayNamed(Random.value < .5f
+                ? RelaxedIdleVariationA
+                : RelaxedIdleVariationB, false, false);
+            ScheduleRelaxedVariation();
+        }
+    }
+
+    void ScheduleRelaxedVariation()
+    {
+        nextRelaxedVariationAt = Time.time + Random.Range(9f, 16f);
+    }
+
+    static bool IsRelaxedClip(string clipName)
+    {
+        return clipName == RelaxedIdle ||
+               clipName == RelaxedIdleVariationA ||
+               clipName == RelaxedIdleVariationB ||
+               clipName == RelaxedWalk ||
+               clipName == RelaxedRun;
+    }
+
+    // Called by the regular Animator bridge immediately before attacks, jumps,
+    // impacts and other base-controller actions. This prevents the full-body
+    // relaxed playable from visually covering the requested action.
+    public void ReleaseRelaxedPoseForAction()
+    {
+        if (IsRelaxedClip(currentClipName))
+        {
+            // Animator triggers are stored on the real Animator, not on the temporary
+            // AnimatorControllerPlayable below this relaxed layer. Leaving the graph alive
+            // for a few more frames made attacks/draw transitions arrive late and allowed the
+            // underlying controller to resume an old Jump state. Restore the live controller
+            // state first, then let Mecanim blend normally into the requested action.
             StopPlayback();
+        }
+    }
+
+    void FadeOutRelaxedPose(float duration)
+    {
+        if (!IsRelaxedClip(currentClipName) || !graph.IsValid())
+            return;
+        overlayTargetWeight = 0f;
+        overlayFadeSpeed = 1f / Mathf.Max(.02f, duration);
+        destroyAfterFade = true;
+    }
+
+    void UpdateThreatAwareness()
+    {
+        if (Time.time < nextThreatScan)
+            return;
+        nextThreatScan = Time.time + .22f;
+
+        const float enterRadius = 12f;
+        const float exitRadius = 15f;
+        float radius = threatNearby ? exitRadius : enterRadius;
+        float radiusSqr = radius * radius;
+        bool found = false;
+
+        foreach (EnemyStats enemy in
+                 FindObjectsByType<EnemyStats>(FindObjectsInactive.Exclude))
+        {
+            if (!IsHostileThreat(enemy))
+                continue;
+            Vector3 delta = enemy.transform.position - transform.position;
+            delta.y = 0f;
+            if (delta.sqrMagnitude > radiusSqr)
+                continue;
+            found = true;
+            lastThreatSeenAt = Time.time;
+            break;
+        }
+
+        if (found)
+            threatNearby = true;
+        else if (Time.time - lastThreatSeenAt > 1.15f)
+            threatNearby = false;
+    }
+
+    static bool IsHostileThreat(EnemyStats enemy)
+    {
+        if (enemy == null || enemy.IsDead)
+            return false;
+        GameObject candidate = enemy.gameObject;
+        AnimalAI animal = candidate.GetComponent<AnimalAI>();
+        if (animal != null && !animal.IsCombatHostile)
+            return false;
+        return candidate.GetComponent<NPCWander>() == null &&
+               candidate.GetComponent<TonioQuestGiver>() == null &&
+               candidate.GetComponent<NahueQuestGiver>() == null &&
+               candidate.GetComponent<NPCHerrero>() == null &&
+               candidate.GetComponent<NPCMerchant>() == null;
     }
 
     void PlayNamed(string clipName, bool loop, bool upperBody)
@@ -250,12 +480,26 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
     {
         RefreshAnimators();
         if (clip == null || animators.Count == 0) return;
+        bool changingBetweenRelaxedClips =
+            IsRelaxedClip(currentClipName) && graph.IsValid() &&
+            overlayWeight > .5f && IsRelaxedClip(clip.name);
         StopPlayback();
         currentClipName = clip.name;
         looping = loop;
+        bool relaxedClip = IsRelaxedClip(currentClipName);
+        bool compositeRelaxedWalk = currentClipName == RelaxedWalk;
+        // Never reveal the combat controller between peaceful idle/walk clips.
+        // That brief zero-weight frame was the visible "hands holding a sword"
+        // flash while the actual weapon remained on the back.
+        overlayWeight = relaxedClip && !changingBetweenRelaxedClips ? 0f : 1f;
+        overlayTargetWeight = 1f;
+        overlayFadeSpeed = relaxedClip ? 1f / .18f : 20f;
+        destroyAfterFade = false;
         graph = PlayableGraph.Create("Player_DoubleL_RPG_Animations");
         graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
-        upperBodyMask = upperBody ? BuildUpperBodyMask() : null;
+        upperBodyMask = upperBody || compositeRelaxedWalk
+            ? BuildUpperBodyMask()
+            : null;
 
         foreach (Animator target in animators)
         {
@@ -275,27 +519,177 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
             }
 
             AnimationLayerMixerPlayable mixer =
-                AnimationLayerMixerPlayable.Create(graph, 2);
+                AnimationLayerMixerPlayable.Create(graph,
+                    compositeRelaxedWalk ? 3 : 2);
             graph.Connect(baseController, 0, mixer, 0);
             mixer.SetInputWeight(0, 1f);
             AnimationClipPlayable clipPlayable =
                 AnimationClipPlayable.Create(graph, clip);
             clipPlayable.SetApplyFootIK(!upperBody);
             clipPlayable.SetApplyPlayableIK(false);
+            if (currentClipName == RelaxedWalk)
+                clipPlayable.SetSpeed(movement != null
+                    ? movement.PeacefulWalkPlaybackSpeed
+                    : 1d);
+            else if (currentClipName == RelaxedRun)
+                clipPlayable.SetSpeed(movement != null
+                    ? movement.PeacefulRunPlaybackSpeed
+                    : 1d);
             graph.Connect(clipPlayable, 0, mixer, 1);
-            mixer.SetInputWeight(1, 1f);
-            if (upperBodyMask != null)
+            mixer.SetInputWeight(1, overlayWeight);
+            if (upperBodyMask != null && !compositeRelaxedWalk)
                 mixer.SetLayerMaskFromAvatarMask(1, upperBodyMask);
+
+            if (compositeRelaxedWalk)
+            {
+                AnimationClip relaxedUpperClip =
+                    catalog != null ? catalog.Find(RelaxedIdle) : null;
+                if (relaxedUpperClip != null)
+                {
+                    AnimationClipPlayable upperPlayable =
+                        AnimationClipPlayable.Create(graph, relaxedUpperClip);
+                    upperPlayable.SetApplyFootIK(false);
+                    graph.Connect(upperPlayable, 0, mixer, 2);
+                    mixer.SetInputWeight(2, overlayWeight);
+                    mixer.SetLayerMaskFromAvatarMask(2, upperBodyMask);
+                    clipPlayables.Add(upperPlayable);
+                }
+            }
             AnimationPlayableOutput output = AnimationPlayableOutput.Create(
                 graph, "DoubleL_" + target.name, target);
             output.SetSourcePlayable(mixer);
             controlledAnimators.Add(target);
             controllerPlayables.Add(baseController);
             clipPlayables.Add(clipPlayable);
+            layerMixers.Add(mixer);
         }
         graph.Play();
         if (!loop)
             Invoke(nameof(FinishOneShot), Mathf.Max(.15f, clip.length));
+    }
+
+    void UpdateRelaxedLocomotionSpeed()
+    {
+        if ((currentClipName != RelaxedWalk &&
+             currentClipName != RelaxedRun) || movement == null)
+            return;
+
+        double speed = currentClipName == RelaxedRun
+            ? movement.PeacefulRunPlaybackSpeed
+            : movement.PeacefulWalkPlaybackSpeed;
+        foreach (AnimationClipPlayable playable in clipPlayables)
+            if (playable.IsValid() &&
+                playable.GetAnimationClip() != null &&
+                playable.GetAnimationClip().name == currentClipName)
+                playable.SetSpeed(speed);
+    }
+
+    public bool PlayMovingSwordAttack(int actionIndex, float speedMultiplier)
+    {
+        if (catalog == null)
+            catalog = Resources.Load<RpgAnimationPackCatalog>(CatalogResource);
+        string attackClipName = "2Hand-Sword-Attack" +
+                          Mathf.Clamp(actionIndex, 1, 11);
+        movingAttackUsesRun = movement != null && movement.IsSprinting;
+        string locomotionClipName = movingAttackUsesRun
+            ? "2Hand-Sword-Run-Forward"
+            : "2Hand-Sword-Walk";
+        AnimationClip attackClip =
+            catalog != null ? catalog.Find(attackClipName) : null;
+        AnimationClip locomotionClip =
+            catalog != null ? catalog.Find(locomotionClipName) : null;
+        if (attackClip == null || locomotionClip == null)
+            return false;
+
+        RefreshAnimators();
+        if (animators.Count == 0)
+            return false;
+        StopPlayback();
+        currentClipName = attackClip.name;
+        looping = false;
+        overlayWeight = 1f;
+        overlayTargetWeight = 1f;
+        destroyAfterFade = false;
+        graph = PlayableGraph.Create("Player_Moving_Sword_Attack");
+        graph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+        upperBodyMask = BuildUpperBodyMask();
+
+        double attackSpeed = Mathf.Max(.1f, speedMultiplier);
+        foreach (Animator target in animators)
+        {
+            if (target == null || !target.isActiveAndEnabled ||
+                target.runtimeAnimatorController == null)
+                continue;
+
+            AnimatorControllerPlayable baseController =
+                AnimatorControllerPlayable.Create(graph,
+                    target.runtimeAnimatorController);
+            CopyParameters(target, baseController);
+            for (int layer = 0; layer < target.layerCount; layer++)
+            {
+                AnimatorStateInfo state =
+                    target.GetCurrentAnimatorStateInfo(layer);
+                if (state.fullPathHash != 0)
+                    baseController.Play(state.fullPathHash, layer,
+                        state.normalizedTime);
+            }
+
+            AnimationLayerMixerPlayable mixer =
+                AnimationLayerMixerPlayable.Create(graph, 3);
+            graph.Connect(baseController, 0, mixer, 0);
+            mixer.SetInputWeight(0, 1f);
+
+            AnimationClipPlayable locomotionPlayable =
+                AnimationClipPlayable.Create(graph, locomotionClip);
+            locomotionPlayable.SetApplyFootIK(true);
+            locomotionPlayable.SetSpeed(CurrentMovingAttackLocomotionSpeed());
+            graph.Connect(locomotionPlayable, 0, mixer, 1);
+            mixer.SetInputWeight(1, 1f);
+
+            AnimationClipPlayable attackPlayable =
+                AnimationClipPlayable.Create(graph, attackClip);
+            attackPlayable.SetApplyFootIK(false);
+            attackPlayable.SetSpeed(attackSpeed);
+            graph.Connect(attackPlayable, 0, mixer, 2);
+            mixer.SetInputWeight(2, 1f);
+            mixer.SetLayerMaskFromAvatarMask(2, upperBodyMask);
+
+            AnimationPlayableOutput output =
+                AnimationPlayableOutput.Create(graph,
+                    "MovingSwordAttack_" + target.name, target);
+            output.SetSourcePlayable(mixer);
+            controlledAnimators.Add(target);
+            controllerPlayables.Add(baseController);
+            clipPlayables.Add(attackPlayable);
+            movingAttackLocomotionPlayables.Add(locomotionPlayable);
+            layerMixers.Add(mixer);
+        }
+        graph.Play();
+
+        CancelInvoke(nameof(FinishOneShot));
+        Invoke(nameof(FinishOneShot),
+            Mathf.Max(.15f, attackClip.length / (float)attackSpeed));
+        return true;
+    }
+
+    double CurrentMovingAttackLocomotionSpeed()
+    {
+        if (movement == null)
+            return 1d;
+        return movingAttackUsesRun
+            ? movement.PeacefulRunPlaybackSpeed
+            : movement.PeacefulWalkPlaybackSpeed;
+    }
+
+    void UpdateMovingAttackLocomotion()
+    {
+        if (movingAttackLocomotionPlayables.Count == 0)
+            return;
+        double speed = CurrentMovingAttackLocomotionSpeed();
+        foreach (AnimationClipPlayable playable in
+                 movingAttackLocomotionPlayables)
+            if (playable.IsValid())
+                playable.SetSpeed(speed);
     }
 
     void FinishOneShot()
@@ -396,14 +790,94 @@ public sealed class PlayerRpgAnimationPackController : MonoBehaviour
     void StopPlayback()
     {
         CancelInvoke(nameof(FinishOneShot));
-        if (graph.IsValid()) graph.Destroy();
+        if (graph.IsValid())
+        {
+            RestoreControllerStateToAnimators();
+            graph.Destroy();
+            foreach (Animator animator in controlledAnimators)
+                if (animator != null && animator.isActiveAndEnabled)
+                {
+                    if (movement != null && movement.IsGrounded)
+                        ForceGroundedParameters(animator);
+                    animator.Update(0f);
+                }
+        }
         controlledAnimators.Clear();
         controllerPlayables.Clear();
         clipPlayables.Clear();
+        layerMixers.Clear();
+        movingAttackLocomotionPlayables.Clear();
         if (upperBodyMask != null) Destroy(upperBodyMask);
         upperBodyMask = null;
         looping = false;
         currentClipName = null;
+        overlayWeight = 1f;
+        overlayTargetWeight = 1f;
+        destroyAfterFade = false;
+    }
+
+    void RestoreControllerStateToAnimators()
+    {
+        int count = Mathf.Min(controlledAnimators.Count,
+            controllerPlayables.Count);
+        for (int i = 0; i < count; i++)
+        {
+            Animator animator = controlledAnimators[i];
+            AnimatorControllerPlayable controller = controllerPlayables[i];
+            if (animator == null || !controller.IsValid())
+                continue;
+
+            foreach (AnimatorControllerParameter parameter in
+                     animator.parameters)
+            {
+                switch (parameter.type)
+                {
+                    case AnimatorControllerParameterType.Bool:
+                        animator.SetBool(parameter.nameHash,
+                            controller.GetBool(parameter.nameHash));
+                        break;
+                    case AnimatorControllerParameterType.Float:
+                        animator.SetFloat(parameter.nameHash,
+                            controller.GetFloat(parameter.nameHash));
+                        break;
+                    case AnimatorControllerParameterType.Int:
+                        animator.SetInteger(parameter.nameHash,
+                            controller.GetInteger(parameter.nameHash));
+                        break;
+                }
+            }
+
+            int layers = Mathf.Min(animator.layerCount,
+                controller.GetLayerCount());
+            for (int layer = 0; layer < layers; layer++)
+            {
+                AnimatorStateInfo state =
+                    controller.GetCurrentAnimatorStateInfo(layer);
+                if (state.fullPathHash != 0)
+                    animator.Play(state.fullPathHash, layer,
+                        Mathf.Repeat(state.normalizedTime, 1f));
+            }
+        }
+    }
+
+    static void ForceGroundedParameters(Animator animator)
+    {
+        int jumping = Animator.StringToHash("Jumping");
+        int triggerNumber = Animator.StringToHash("TriggerNumber");
+        int actionTrigger = Animator.StringToHash("Trigger");
+        foreach (AnimatorControllerParameter parameter in animator.parameters)
+        {
+            if (parameter.nameHash == jumping &&
+                parameter.type == AnimatorControllerParameterType.Int)
+                animator.SetInteger(jumping, 0);
+            else if (parameter.nameHash == triggerNumber &&
+                     parameter.type == AnimatorControllerParameterType.Int &&
+                     animator.GetInteger(triggerNumber) == 18)
+                animator.SetInteger(triggerNumber, 0);
+            else if (parameter.nameHash == actionTrigger &&
+                     parameter.type == AnimatorControllerParameterType.Trigger)
+                animator.ResetTrigger(actionTrigger);
+        }
     }
 
     void OnDisable()

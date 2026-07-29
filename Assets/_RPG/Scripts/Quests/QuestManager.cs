@@ -47,7 +47,9 @@ public enum PrimaryQuestState
     SeventhFollowBloodTrail,
     SeventhTalkToNahue,
     SeventhWindAftermath,
-    SeventhQuestCompleted
+    SeventhQuestCompleted,
+    // Appended to preserve serialized numeric values from existing save games.
+    SeventhHuntDemonAnomaly
 }
 
 public class QuestManager : MonoBehaviour
@@ -149,6 +151,7 @@ public class QuestManager : MonoBehaviour
         if (MerchantIntroductionState != PrimaryQuestState.ReturnToTonioWithEquipment) return;
         MerchantIntroductionState = PrimaryQuestState.InvestigateGoblinPassage;
         OnQuestChanged?.Invoke();
+        GoblinPassageIntroCinematic.PlayEntranceReveal();
     }
 
     public void ReachGoblinPassageEnd()
@@ -434,8 +437,14 @@ public class QuestManager : MonoBehaviour
 
     public void CompleteSeventhMission()
     {
-        SetPrimaryState(PrimaryQuestState.SeventhWindAftermath,
+        SetPrimaryState(PrimaryQuestState.SeventhHuntDemonAnomaly,
             PrimaryQuestState.SeventhQuestCompleted);
+    }
+
+    public void BeginSeventhAnomalyHunt()
+    {
+        SetPrimaryState(PrimaryQuestState.SeventhWindAftermath,
+            PrimaryQuestState.SeventhHuntDemonAnomaly);
     }
 
     bool HasInventoryItem(string itemId)

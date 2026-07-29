@@ -37,6 +37,7 @@ public sealed class BloodMoonEventManager : MonoBehaviour
     float savedAmbientIntensity;
     float savedReflectionIntensity;
     bool eventActive;
+    bool manualOverrideActive;
     float nextLookup;
     float nextSpawnerRefresh;
     int activeWorldDay = -1;
@@ -95,9 +96,7 @@ public sealed class BloodMoonEventManager : MonoBehaviour
                 gameplayCamera = Camera.main;
         }
 
-        bool shouldBeActive = cycle != null &&
-                              (cycle.WorldDay + 1) % 7 == 0 &&
-                              NightEnemyEventManager.IsNightNow;
+        bool shouldBeActive = manualOverrideActive || IsAutomaticBloodMoonDue();
         if (shouldBeActive && !eventActive)
             BeginBloodMoon();
         else if (!shouldBeActive && eventActive)
@@ -111,6 +110,25 @@ public sealed class BloodMoonEventManager : MonoBehaviour
             ApplySpawnerBoost(true);
             EnsureSatellites();
         }
+    }
+
+    bool IsAutomaticBloodMoonDue()
+    {
+        return cycle != null &&
+               (cycle.WorldDay + 1) % 7 == 0 &&
+               NightEnemyEventManager.IsNightNow;
+    }
+
+    // God-mode testing hook. The automatic seventh-night schedule remains untouched.
+    public bool ToggleManualOverride()
+    {
+        manualOverrideActive = !manualOverrideActive;
+        if (manualOverrideActive && !eventActive)
+            BeginBloodMoon();
+        else if (!manualOverrideActive && eventActive &&
+                 !IsAutomaticBloodMoonDue())
+            EndBloodMoon();
+        return manualOverrideActive;
     }
 
     // Run after the normal sky/day-night scripts so the Blood Moon darkness wins visually.
@@ -141,7 +159,7 @@ public sealed class BloodMoonEventManager : MonoBehaviour
     void BeginBloodMoon()
     {
         eventActive = true;
-        activeWorldDay = cycle.WorldDay;
+        activeWorldDay = cycle != null ? cycle.WorldDay : -1;
         CaptureEnvironment();
         CreatePlayerLight();
         CreateMoonDisc();

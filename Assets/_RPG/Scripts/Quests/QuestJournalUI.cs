@@ -223,7 +223,7 @@ public class QuestJournalUI : MonoBehaviour
                 objective = "Haz clic derecho sobre el <color=#ff5252>Diamante Rojo</color> y libera el hechizo Fireball.";
                 break;
             case PrimaryQuestState.SeventhFindTonio:
-                objective = "Busca a <color=#ffd66b>Tonio</color>. Algo ocurri\u00f3 en el lugar donde estaba.";
+                objective = "Ve a hablar con <color=#ffd66b>Tonio</color> en su lugar habitual.";
                 break;
             case PrimaryQuestState.SeventhFollowBloodTrail:
                 objective = "Sigue el <color=#d63030>rastro de sangre</color> desde Tonio hasta Nahue.";
@@ -234,8 +234,11 @@ public class QuestJournalUI : MonoBehaviour
             case PrimaryQuestState.SeventhWindAftermath:
                 objective = "Busca refugio y sobrevive a la <color=#8fdcff>r\u00e1faga extrema</color>.";
                 break;
+            case PrimaryQuestState.SeventhHuntDemonAnomaly:
+                objective = "Sal de la carpa, atraviesa el sendero y derrota al <color=#b969ff>Demonio An\u00f3malo</color>. El agua est\u00e1 incendiada y la pared de fuego impide regresar a Boat Stain.";
+                break;
             case PrimaryQuestState.SeventhQuestCompleted:
-                objective = "Despertaste junto al Viejo. Nahue muri\u00f3 y el alma de Tonio sigue desaparecida.";
+                objective = "Derrotaste al Demonio An\u00f3malo y obtuviste la <color=#e8d6b0>Espada de Hueso</color>. Boat Stain est\u00e1 bloqueada por obras: debes continuar por otro camino.";
                 break;
             case PrimaryQuestState.SecondQuestCompleted:
                 objective = "Completaste la segunda misi\u00f3n principal y sobreviviste a la prueba de la peste.";
