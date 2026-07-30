@@ -89,6 +89,7 @@ public sealed class OrcWarriorAI : MonoBehaviour
     bool locomotionActive;
     bool usingRunAnimation;
     float stableAnimationSpeed;
+    Transform collisionIgnoredPlayer;
 
     bool hasSpeed;
     bool hasCombat;
@@ -127,6 +128,10 @@ public sealed class OrcWarriorAI : MonoBehaviour
             agent.autoBraking = true;
             usingAgent = agent.enabled && agent.isOnNavMesh;
         }
+
+        GameObject existingPlayer = GameObject.FindWithTag("Player");
+        if (existingPlayer != null)
+            IgnorePlayerBodyCollisions(existingPlayer.transform);
 
         ChangeState(TacticalState.Guard, Random.Range(.6f, 1.4f));
     }
@@ -282,8 +287,41 @@ public sealed class OrcWarriorAI : MonoBehaviour
             return;
 
         player = candidate;
+        IgnorePlayerBodyCollisions(player);
         circleDirection = Random.value < .5f ? -1 : 1;
         ChangeState(TacticalState.Investigate, .35f);
+    }
+
+    void IgnorePlayerBodyCollisions(Transform playerTransform)
+    {
+        if (playerTransform == null)
+            return;
+
+        PlayerStats playerStats =
+            playerTransform.GetComponentInParent<PlayerStats>();
+        Transform playerRoot =
+            playerStats != null ? playerStats.transform : playerTransform.root;
+        if (collisionIgnoredPlayer == playerRoot)
+            return;
+
+        Collider[] enemyColliders =
+            GetComponentsInChildren<Collider>(true);
+        Collider[] playerColliders =
+            playerRoot.GetComponentsInChildren<Collider>(true);
+
+        foreach (Collider enemyCollider in enemyColliders)
+        {
+            if (enemyCollider == null)
+                continue;
+            foreach (Collider playerCollider in playerColliders)
+            {
+                if (playerCollider != null)
+                    Physics.IgnoreCollision(
+                        enemyCollider, playerCollider, true);
+            }
+        }
+
+        collisionIgnoredPlayer = playerRoot;
     }
 
     IEnumerator AttackRoutine(bool alternate)

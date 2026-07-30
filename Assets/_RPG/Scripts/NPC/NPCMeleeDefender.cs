@@ -117,20 +117,24 @@ public class NPCMeleeDefender : MonoBehaviour
         foreach (EnemyStats enemy in FindObjectsByType<EnemyStats>(FindObjectsInactive.Exclude))
         {
             if (!IsHostile(enemy)) continue;
-            float distance = (enemy.transform.position - transform.position).sqrMagnitude;
+            float distance = HorizontalSqrDistance(
+                enemy.transform.position, transform.position);
             if (distance < bestDistance) { bestDistance = distance; best = enemy; }
         }
         return best;
     }
 
     bool IsValidTarget(EnemyStats enemy) =>
-        IsHostile(enemy) && (enemy.transform.position - transform.position).sqrMagnitude <=
-        detectionRadius * detectionRadius;
+        IsHostile(enemy) &&
+        HorizontalSqrDistance(enemy.transform.position, transform.position) <=
+            detectionRadius * detectionRadius;
 
     static bool IsHostile(EnemyStats enemy)
     {
         if (enemy == null || enemy.IsDead) return false;
         GameObject go = enemy.gameObject;
+        if (go.GetComponent<OrcWarriorAI>() != null)
+            return true;
         AnimalAI animal = go.GetComponent<AnimalAI>();
         if (animal != null && !animal.IsCombatHostile)
             return false;
@@ -139,6 +143,13 @@ public class NPCMeleeDefender : MonoBehaviour
                go.GetComponent<NahueQuestGiver>() == null &&
                go.GetComponent<NPCHerrero>() == null &&
                go.GetComponent<NPCMerchant>() == null;
+    }
+
+    static float HorizontalSqrDistance(Vector3 a, Vector3 b)
+    {
+        a.y = 0f;
+        b.y = 0f;
+        return (a - b).sqrMagnitude;
     }
 
     void EnterCombat()

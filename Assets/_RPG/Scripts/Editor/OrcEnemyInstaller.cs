@@ -379,6 +379,7 @@ public static class OrcWarriorEnemySetup
         int enemyLayer = LayerMask.NameToLayer("Enemy");
         if (enemyLayer < 0)
             enemyLayer = 0;
+        root.tag = "Enemy";
         foreach (Transform child in
                  root.GetComponentsInChildren<Transform>(true))
             child.gameObject.layer = enemyLayer;
