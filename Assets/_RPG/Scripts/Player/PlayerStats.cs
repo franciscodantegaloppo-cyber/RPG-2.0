@@ -547,7 +547,7 @@ public class PlayerStats : MonoBehaviour
         GameObject textObject = new GameObject("Message", typeof(RectTransform), typeof(TextMeshProUGUI));
         textObject.transform.SetParent(panel.transform, false);
         TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
-        label.text = "TE COMIÃ“ LA PESTE";
+        label.text = "TE COMI\u00d3 LA PESTE";
         label.fontSize = 42f;
         label.enableAutoSizing = true;
         label.fontSizeMin = 24f;

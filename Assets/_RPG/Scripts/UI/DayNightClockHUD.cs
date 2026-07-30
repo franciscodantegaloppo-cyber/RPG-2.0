@@ -146,8 +146,8 @@ public sealed class DayNightClockHUD : MonoBehaviour
         RectTransform rect = panel.GetComponent<RectTransform>();
         rect.anchorMin = rect.anchorMax = new Vector2(.5f, 1f);
         rect.pivot = new Vector2(.5f, 1f);
-        rect.anchoredPosition = new Vector2(0f, -22f);
-        rect.sizeDelta = new Vector2(440f, 46f);
+        rect.anchoredPosition = new Vector2(0f, -24f);
+        rect.sizeDelta = new Vector2(660f, 58f);
 
         Image background = panel.GetComponent<Image>();
         Sprite frame = Resources.Load<Sprite>("UI/SharpUI/Panel");
@@ -178,18 +178,20 @@ public sealed class DayNightClockHUD : MonoBehaviour
         RectTransform textRect = textObject.GetComponent<RectTransform>();
         textRect.anchorMin = Vector2.zero;
         textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = new Vector2(14f, 4f);
-        textRect.offsetMax = new Vector2(-14f, -4f);
+        textRect.offsetMin = new Vector2(22f, 7f);
+        textRect.offsetMax = new Vector2(-22f, -7f);
 
         label = textObject.GetComponent<TextMeshProUGUI>();
         if (label == null)
             label = textObject.AddComponent<TextMeshProUGUI>();
         label.alignment = TextAlignmentOptions.Center;
-        label.fontSize = 15f;
-        label.enableAutoSizing = true;
-        label.fontSizeMin = 11f;
-        label.fontSizeMax = 15f;
+        label.fontSize = 18f;
+        label.enableAutoSizing = false;
         label.fontStyle = FontStyles.Bold;
+        label.characterSpacing = .5f;
+        label.lineSpacing = 4f;
+        label.textWrappingMode = TextWrappingModes.NoWrap;
+        label.overflowMode = TextOverflowModes.Ellipsis;
         label.color = new Color(1f, .82f, .45f);
         label.outlineColor = new Color(.08f, .02f, .01f, 1f);
         label.outlineWidth = .14f;

@@ -27,6 +27,11 @@ public sealed class MuTypefaceApplicator : MonoBehaviour
         {
             muFont = TMP_FontAsset.CreateFontAsset(source);
             muFont.name = "MU_Cinzel_Runtime";
+            muFont.atlasPopulationMode = AtlasPopulationMode.Dynamic;
+            TMP_FontAsset fallback = TMP_Settings.defaultFontAsset;
+            if (fallback != null && fallback != muFont &&
+                !muFont.fallbackFontAssetTable.Contains(fallback))
+                muFont.fallbackFontAssetTable.Add(fallback);
         }
         SceneManager.sceneLoaded += OnSceneLoaded;
         Apply();

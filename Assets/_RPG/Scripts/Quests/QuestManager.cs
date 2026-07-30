@@ -207,7 +207,7 @@ public class QuestManager : MonoBehaviour
         PlayerStats player = FindAnyObjectByType<PlayerStats>();
         if (player != null)
             QuestOverheadThought.Show(player.transform,
-                "Siento aÃºn mÃ¡s poder... pero Â¿quÃ© es esa peste de la que tanto me habla? Los goblins eran fÃ¡ciles. Debo investigar aÃºn mÃ¡s...",
+                "Siento a\u00fan m\u00e1s poder... pero \u00bfqu\u00e9 es esa peste de la que tanto me habla? Los goblins eran f\u00e1ciles. Debo investigar a\u00fan m\u00e1s...",
                 7f);
 
         MerchantIntroductionState = PrimaryQuestState.InvestigatePlagueTalkToTonio;
