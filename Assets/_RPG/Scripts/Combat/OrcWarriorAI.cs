@@ -2,41 +2,31 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
 
-// A deliberate melee opponent: it observes, circles, commits to short attack
-// windows and disengages instead of continuously running into the player.
+// Persistent melee enemy: idle/patrol until the player enters its awareness
+// radius, then chase, stop in strike range, attack/react and resume pursuit.
 [RequireComponent(typeof(EnemyStats))]
 public sealed class OrcWarriorAI : MonoBehaviour
 {
     enum TacticalState
     {
         Guard,
-        Investigate,
         Pursue,
-        Circle,
         Attack,
-        Retreat,
         Hurt,
         Dead
     }
 
     [Header("Awareness")]
-    [SerializeField] float detectionRadius = 16f;
-    [SerializeField] float loseInterestRadius = 28f;
-    [SerializeField] float homeLeashRadius = 34f;
-    [SerializeField] float eyeHeight = 1.65f;
+    [SerializeField] float detectionRadius = 20f;
     [SerializeField] float decisionInterval = .12f;
-    [SerializeField] LayerMask sightMask = ~0;
 
     [Header("Movement")]
     [SerializeField] float patrolRadius = 6f;
     [SerializeField] float walkSpeed = 1.75f;
     [SerializeField] float pursueSpeed = 4.25f;
-    [SerializeField] float circleSpeed = 2.05f;
-    [SerializeField] float retreatSpeed = 3.15f;
     [SerializeField] float turnSpeed = 520f;
     [SerializeField] float preferredRange = 2.15f;
     [SerializeField] float attackRange = 2.35f;
-    [SerializeField] float personalSpace = 1.25f;
     [SerializeField] float authoredWalkSpeed = 1.7f;
     [SerializeField] float authoredRunSpeed = 4.15f;
     [SerializeField] Vector2 locomotionPlaybackRange =
@@ -54,7 +44,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
     [SerializeField] float recoveryTime = .48f;
     [SerializeField, Range(0f, 1f)] float blockChance = .22f;
     [SerializeField] float blockCooldown = 3.4f;
-    [SerializeField, Range(0f, 1f)] float retreatChance = .48f;
 
     static readonly int SpeedHash = Animator.StringToHash("Speed");
     static readonly int CombatHash = Animator.StringToHash("Combat");
@@ -63,7 +52,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
     static readonly int HitHash = Animator.StringToHash("Hit");
     static readonly int DieHash = Animator.StringToHash("Die");
     static readonly int BlockHash = Animator.StringToHash("Block");
-    static readonly int DodgeHash = Animator.StringToHash("Dodge");
 
     readonly Collider[] playerHits = new Collider[4];
 
@@ -81,7 +69,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
     float nextBlockTime;
     float stateUntil;
     float nextPatrolTime;
-    int circleDirection;
     bool hasDestination;
     bool usingAgent;
     bool actionLocked;
@@ -90,6 +77,7 @@ public sealed class OrcWarriorAI : MonoBehaviour
     bool usingRunAnimation;
     float stableAnimationSpeed;
     Transform collisionIgnoredPlayer;
+    bool playerDetected;
 
     bool hasSpeed;
     bool hasCombat;
@@ -98,7 +86,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
     bool hasHit;
     bool hasDie;
     bool hasBlock;
-    bool hasDodge;
 
     public bool IsDead => state == TacticalState.Dead;
 
@@ -110,7 +97,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
         terrain = Terrain.activeTerrain;
         homePosition = ProjectToGround(transform.position);
         previousPosition = transform.position;
-        circleDirection = Random.value < .5f ? -1 : 1;
 
         if (animator != null)
         {
@@ -140,6 +126,12 @@ public sealed class OrcWarriorAI : MonoBehaviour
     {
         nextDecisionTime = Time.time + Random.Range(.05f, .18f);
         nextPatrolTime = Time.time + Random.Range(1f, 2.5f);
+        PlayerStats.GlobalOnDeath += HandlePlayerDeath;
+    }
+
+    void OnDisable()
+    {
+        PlayerStats.GlobalOnDeath -= HandlePlayerDeath;
     }
 
     void Update()
@@ -175,81 +167,44 @@ public sealed class OrcWarriorAI : MonoBehaviour
         if (player == null)
         {
             TryAcquirePlayer();
-            GuardArea();
-            return;
+            if (player == null)
+            {
+                playerDetected = false;
+                GuardArea();
+                return;
+            }
         }
 
-        float distance = FlatDistance(transform.position, player.position);
-        float homeDistance = FlatDistance(transform.position, homePosition);
-        if (distance > loseInterestRadius || homeDistance > homeLeashRadius)
+        if (!playerDetected)
         {
-            player = null;
-            ChangeState(TacticalState.Guard, Random.Range(.4f, 1f));
-            MoveTo(homePosition, walkSpeed);
-            return;
+            float initialDistance =
+                FlatDistance(transform.position, player.position);
+            if (initialDistance > detectionRadius)
+            {
+                player = null;
+                GuardArea();
+                return;
+            }
+            playerDetected = true;
         }
 
+        // Once the encounter starts the orc behaves like the Crab Demon melee
+        // core: it keeps the same target and closes the gap until one of them
+        // dies. There are no random investigate/circle/retreat decisions.
         SetCombat(true);
-
-        if (!HasLineOfSight(player))
-        {
-            ChangeState(TacticalState.Investigate, 1.4f);
-            MoveTo(player.position, walkSpeed);
-            return;
-        }
-
-        if (state == TacticalState.Retreat && Time.time < stateUntil)
-        {
-            Vector3 away = FlatDirection(player.position, transform.position);
-            Vector3 side = Vector3.Cross(Vector3.up, away) *
-                           circleDirection * .45f;
-            MoveTo(transform.position + (away + side).normalized * 3.2f,
-                retreatSpeed);
-            return;
-        }
-
-        if (distance < personalSpace && Random.value < .72f)
-        {
-            ChangeState(TacticalState.Retreat,
-                Random.Range(.4f, .8f));
-            return;
-        }
-
-        // Different enter/exit distances keep the tactical brain from
-        // alternating Pursue/Circle whenever it is standing on the boundary.
-        float pursueEnterDistance = preferredRange * 1.7f;
-        float pursueExitDistance = preferredRange * 1.32f;
-        bool shouldPursue = state == TacticalState.Pursue
-            ? distance > pursueExitDistance
-            : distance > pursueEnterDistance;
-        if (shouldPursue)
+        float distance = FlatDistance(transform.position, player.position);
+        if (distance > attackRange)
         {
             ChangeState(TacticalState.Pursue);
-            Vector3 offset = CircleDirectionFromPlayer() *
-                             preferredRange * .82f;
-            MoveTo(player.position + offset, pursueSpeed);
+            MoveTo(player.position, pursueSpeed);
             return;
         }
 
+        StopMoving();
+        Face(player.position);
+        ChangeState(TacticalState.Guard);
         if (distance <= attackRange && Time.time >= nextAttackTime)
-        {
             StartCoroutine(AttackRoutine(Random.value > .58f));
-            return;
-        }
-
-        // At fighting distance the orc keeps changing angle so it cannot be
-        // defeated by simply holding the attack button in one direction.
-        ChangeState(TacticalState.Circle, Random.Range(.7f, 1.45f));
-        Vector3 radial = FlatDirection(player.position, transform.position);
-        Vector3 tangent = Vector3.Cross(Vector3.up, radial) * circleDirection;
-        float rangeCorrection = Mathf.Clamp(
-            preferredRange - distance, -.8f, .8f);
-        Vector3 tacticalDirection =
-            (tangent + radial * rangeCorrection * .7f).normalized;
-        MoveTo(transform.position + tacticalDirection * 2.25f, circleSpeed);
-
-        if (Random.value < .08f)
-            circleDirection *= -1;
     }
 
     void GuardArea()
@@ -283,13 +238,29 @@ public sealed class OrcWarriorAI : MonoBehaviour
             return;
 
         Transform candidate = playerHits[0].transform;
-        if (!HasLineOfSight(candidate))
+        PlayerStats candidateStats =
+            candidate.GetComponentInParent<PlayerStats>();
+        player = candidateStats != null
+            ? candidateStats.transform
+            : candidate.root;
+        IgnorePlayerBodyCollisions(player);
+        playerDetected = true;
+        ChangeState(TacticalState.Pursue);
+    }
+
+    void HandlePlayerDeath()
+    {
+        if (state == TacticalState.Dead)
             return;
 
-        player = candidate;
-        IgnorePlayerBodyCollisions(player);
-        circleDirection = Random.value < .5f ? -1 : 1;
-        ChangeState(TacticalState.Investigate, .35f);
+        StopAllCoroutines();
+        actionLocked = false;
+        playerDetected = false;
+        player = null;
+        StopMoving();
+        StopLocomotionAnimation();
+        SetCombat(false);
+        ChangeState(TacticalState.Guard, 1.2f);
     }
 
     void IgnorePlayerBodyCollisions(Transform playerTransform)
@@ -329,6 +300,7 @@ public sealed class OrcWarriorAI : MonoBehaviour
         actionLocked = true;
         ChangeState(TacticalState.Attack);
         StopMoving();
+        StopLocomotionAnimation();
         Face(player != null ? player.position :
             transform.position + transform.forward);
 
@@ -359,18 +331,9 @@ public sealed class OrcWarriorAI : MonoBehaviour
         nextAttackTime = Time.time +
                          attackCooldown * Random.Range(.88f, 1.18f);
         actionLocked = false;
-        if (Random.value < retreatChance)
-        {
-            if (hasDodge && Random.value < .45f)
-                Trigger(DodgeHash);
-            ChangeState(TacticalState.Retreat,
-                Random.Range(.55f, 1.05f));
-        }
-        else
-        {
-            ChangeState(TacticalState.Circle,
-                Random.Range(.55f, 1.15f));
-        }
+        ChangeState(player != null
+            ? TacticalState.Pursue
+            : TacticalState.Guard);
     }
 
     public bool TryBlock(Vector3 attackerPosition, float incomingDamage)
@@ -397,13 +360,16 @@ public sealed class OrcWarriorAI : MonoBehaviour
     {
         actionLocked = true;
         StopMoving();
+        StopLocomotionAnimation();
         if (hasBlock)
             Trigger(BlockHash);
         yield return new WaitForSeconds(.52f);
         if (state != TacticalState.Dead)
         {
             actionLocked = false;
-            ChangeState(TacticalState.Circle, .65f);
+            ChangeState(player != null
+                ? TacticalState.Pursue
+                : TacticalState.Guard);
         }
     }
 
@@ -413,9 +379,7 @@ public sealed class OrcWarriorAI : MonoBehaviour
             return;
 
         StopAllCoroutines();
-        actionLocked = false;
-        Trigger(HitHash);
-        ChangeState(TacticalState.Hurt, .28f);
+        StartCoroutine(HurtRoutine());
         nextAttackTime = Mathf.Max(nextAttackTime, Time.time + .45f);
 
         if (player == null)
@@ -424,6 +388,27 @@ public sealed class OrcWarriorAI : MonoBehaviour
             if (playerObject != null)
                 player = playerObject.transform;
         }
+        if (player != null)
+        {
+            playerDetected = true;
+            IgnorePlayerBodyCollisions(player);
+        }
+    }
+
+    IEnumerator HurtRoutine()
+    {
+        actionLocked = true;
+        StopMoving();
+        StopLocomotionAnimation();
+        ChangeState(TacticalState.Hurt, .38f);
+        Trigger(HitHash);
+        yield return new WaitForSeconds(.38f);
+        if (state == TacticalState.Dead)
+            yield break;
+        actionLocked = false;
+        ChangeState(player != null
+            ? TacticalState.Pursue
+            : TacticalState.Guard);
     }
 
     public void OnDeath()
@@ -434,6 +419,7 @@ public sealed class OrcWarriorAI : MonoBehaviour
         state = TacticalState.Dead;
         StopAllCoroutines();
         StopMoving();
+        StopLocomotionAnimation();
         SetCombat(false);
         Trigger(DieHash);
 
@@ -468,17 +454,9 @@ public sealed class OrcWarriorAI : MonoBehaviour
 
     float CurrentMovementSpeed()
     {
-        switch (state)
-        {
-            case TacticalState.Pursue:
-                return pursueSpeed;
-            case TacticalState.Circle:
-                return circleSpeed;
-            case TacticalState.Retreat:
-                return retreatSpeed;
-            default:
-                return walkSpeed;
-        }
+        return state == TacticalState.Pursue
+            ? pursueSpeed
+            : walkSpeed;
     }
 
     void MoveTo(Vector3 target, float speed)
@@ -504,6 +482,17 @@ public sealed class OrcWarriorAI : MonoBehaviour
         }
     }
 
+    void StopLocomotionAnimation()
+    {
+        locomotionActive = false;
+        usingRunAnimation = false;
+        stableAnimationSpeed = 0f;
+        if (animator != null && hasSpeed)
+            animator.SetFloat(SpeedHash, 0f);
+        if (animator != null)
+            animator.speed = 1f;
+    }
+
     bool ReachedDestination()
     {
         if (usingAgent && agent != null && agent.enabled &&
@@ -515,34 +504,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
         }
 
         return FlatDistance(transform.position, destination) <= .45f;
-    }
-
-    bool HasLineOfSight(Transform target)
-    {
-        if (target == null)
-            return false;
-
-        Vector3 origin = transform.position + Vector3.up * eyeHeight;
-        Vector3 end = target.position + Vector3.up * 1.05f;
-        Vector3 direction = end - origin;
-        if (!Physics.Raycast(origin, direction.normalized,
-                out RaycastHit hit, direction.magnitude, sightMask,
-                QueryTriggerInteraction.Ignore))
-            return true;
-
-        return hit.transform == target ||
-               hit.transform.IsChildOf(target) ||
-               hit.transform.GetComponentInParent<PlayerStats>() != null;
-    }
-
-    Vector3 CircleDirectionFromPlayer()
-    {
-        if (player == null)
-            return -transform.forward;
-        float angle = circleDirection * Random.Range(32f, 58f);
-        Vector3 radial =
-            FlatDirection(player.position, transform.position);
-        return Quaternion.Euler(0f, angle, 0f) * radial;
     }
 
     void Face(Vector3 worldPoint)
@@ -672,8 +633,7 @@ public sealed class OrcWarriorAI : MonoBehaviour
             (hash == AttackAltHash && !hasAttackAlt) ||
             (hash == HitHash && !hasHit) ||
             (hash == DieHash && !hasDie) ||
-            (hash == BlockHash && !hasBlock) ||
-            (hash == DodgeHash && !hasDodge))
+            (hash == BlockHash && !hasBlock))
             return;
         animator.SetTrigger(hash);
     }
@@ -691,7 +651,6 @@ public sealed class OrcWarriorAI : MonoBehaviour
             else if (parameter.nameHash == HitHash) hasHit = true;
             else if (parameter.nameHash == DieHash) hasDie = true;
             else if (parameter.nameHash == BlockHash) hasBlock = true;
-            else if (parameter.nameHash == DodgeHash) hasDodge = true;
         }
     }
 

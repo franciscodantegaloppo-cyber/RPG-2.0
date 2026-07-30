@@ -118,8 +118,8 @@ public static class OrcWarriorEnemySetup
                       ? "Humanoid"
                       : "Generic") +
                   ", posicion=" + instance.transform.position +
-                  ". IA tactica, golpes sincronizados, bloqueo, rodeo y " +
-                  "retirada activos.");
+                  ". Deteccion a 20 m, persecucion persistente, golpes " +
+                  "sincronizados, bloqueo y reacciones activos.");
     }
 
     static void EnsureFolders()
@@ -466,8 +466,7 @@ public static class OrcWarriorEnemySetup
         OrcWarriorAI ai = root.GetComponent<OrcWarriorAI>();
         if (ai == null)
             ai = root.AddComponent<OrcWarriorAI>();
-        SetLayerMask(ai, "sightMask",
-            ~LayerMask.GetMask("Enemy", "Ignore Raycast"));
+        SetFloat(ai, "detectionRadius", 20f);
 
         NPCVisualGroundAligner aligner =
             root.GetComponent<NPCVisualGroundAligner>();
@@ -809,14 +808,5 @@ public static class OrcWarriorEnemySetup
         serialized.ApplyModifiedPropertiesWithoutUndo();
     }
 
-    static void SetLayerMask(Object target,
-        string property, LayerMask value)
-    {
-        SerializedObject serialized = new SerializedObject(target);
-        SerializedProperty field = serialized.FindProperty(property);
-        if (field != null)
-            field.intValue = value.value;
-        serialized.ApplyModifiedPropertiesWithoutUndo();
-    }
 }
 #endif
