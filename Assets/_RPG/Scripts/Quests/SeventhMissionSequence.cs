@@ -49,6 +49,12 @@ public sealed class SeventhMissionSequence : MonoBehaviour
         if (QuestManager.Instance == null) return;
         PrimaryQuestState state =
             QuestManager.Instance.MerchantIntroductionState;
+        if (state == PrimaryQuestState.SeventhQuestCompleted)
+        {
+            MissionSevenAnomalyPathController
+                .EnsureCityConstructionBlockade();
+            return;
+        }
         if (state == PrimaryQuestState.SeventhHuntDemonAnomaly)
         {
             PlayerController controller =

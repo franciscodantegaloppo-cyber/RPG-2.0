@@ -364,52 +364,183 @@ public sealed class MissionSevenAnomalyPathController : MonoBehaviour
 
     void BuildConstructionBlockade()
     {
-        if (barrier == null) return;
-        barrier.name = "BoatStain_ConstructionBlockade";
-        Transform fire = barrier.transform.Find("FireVisuals");
-        if (fire != null) Destroy(fire.gameObject);
-        BoxCollider blocker = barrier.GetComponent<BoxCollider>();
-        if (blocker != null)
-        {
-            blocker.center = new Vector3(0f, 1.7f, 0f);
-            blocker.size = new Vector3(34f, 3.6f, 3.2f);
-        }
-
-        Material wood = CreateMaterial(new Color(.24f, .105f, .025f));
-        Material stone = CreateMaterial(new Color(.18f, .16f, .15f));
-        for (int i = -8; i <= 8; i++)
-        {
-            GameObject post = GameObject.CreatePrimitive(
-                PrimitiveType.Cube);
-            post.name = "ConstructionPost";
-            post.transform.SetParent(barrier.transform, false);
-            post.transform.localPosition =
-                new Vector3(i * 2f, 1.45f, 0f);
-            post.transform.localRotation =
-                Quaternion.Euler(0f, 0f, i % 2 == 0 ? 5f : -5f);
-            post.transform.localScale = new Vector3(.24f, 3f, .38f);
-            post.GetComponent<Renderer>().sharedMaterial = wood;
-            Destroy(post.GetComponent<Collider>());
-
-            GameObject rock = GameObject.CreatePrimitive(
-                PrimitiveType.Sphere);
-            rock.name = "ConstructionRock";
-            rock.transform.SetParent(barrier.transform, false);
-            rock.transform.localPosition =
-                new Vector3(i * 2f, .42f, .25f);
-            rock.transform.localScale =
-                new Vector3(1.35f, .82f, 1.18f);
-            rock.GetComponent<Renderer>().sharedMaterial = stone;
-            Destroy(rock.GetComponent<Collider>());
-        }
-        AddConstructionSign();
+        if (barrier != null)
+            Destroy(barrier);
+        barrier = EnsureCityConstructionBlockade();
     }
 
-    void AddConstructionSign()
+    /// <summary>
+    /// Restores the construction perimeter when a completed save is loaded.
+    /// The village is enclosed on every side instead of only at the bridge.
+    /// </summary>
+    public static GameObject EnsureCityConstructionBlockade()
+    {
+        GameObject existing = GameObject.Find(
+            "BoatStain_ConstructionPerimeter");
+        if (existing != null) return existing;
+
+        GameObject obsolete = GameObject.Find(
+            "BoatStain_ConstructionBlockade");
+        if (obsolete != null) Destroy(obsolete);
+
+        Vector3 center = FindVillageCenter();
+        float radius = CalculateVillageRadius(center);
+        const int segmentCount = 48;
+        float arcWidth = 2f * Mathf.PI * radius / segmentCount;
+
+        GameObject root = new GameObject(
+            "BoatStain_ConstructionPerimeter");
+        root.transform.position = center;
+        Material wood = CreateMaterial(new Color(.24f, .105f, .025f));
+        Material stone = CreateMaterial(new Color(.18f, .16f, .15f));
+
+        for (int i = 0; i < segmentCount; i++)
+        {
+            float angle = i * Mathf.PI * 2f / segmentCount;
+            Vector3 radial = new Vector3(Mathf.Sin(angle), 0f,
+                Mathf.Cos(angle));
+            Vector3 position = center + radial * radius;
+            position.y = SampleGroundHeight(position, center.y);
+
+            GameObject section = new GameObject(
+                $"ConstructionSection_{i:00}");
+            section.transform.SetParent(root.transform, true);
+            section.transform.SetPositionAndRotation(position,
+                Quaternion.LookRotation(radial, Vector3.up));
+            BoxCollider blocker = section.AddComponent<BoxCollider>();
+            blocker.center = new Vector3(0f, 2f, 0f);
+            blocker.size = new Vector3(arcWidth * 1.18f, 4.2f, 3.4f);
+
+            AddConstructionBeam(section.transform, wood, arcWidth);
+            if (i % 2 == 0)
+                AddConstructionPost(section.transform, wood);
+            if (i % 3 == 0)
+                AddConstructionRock(section.transform, stone, i);
+            if (i % 12 == 0)
+                AddConstructionSign(section.transform);
+        }
+
+        return root;
+    }
+
+    static Vector3 FindVillageCenter()
+    {
+        try
+        {
+            GameObject spawn = GameObject.FindGameObjectWithTag(
+                "SpawnPoint");
+            if (spawn != null) return spawn.transform.position;
+        }
+        catch (UnityException) { }
+
+        GameObject named = GameObject.Find("SpawnPoint") ??
+                           GameObject.Find("PlayerSpawn");
+        if (named != null) return named.transform.position;
+
+        TonioQuestGiver tonio = FindAnyObjectByType<TonioQuestGiver>(
+            FindObjectsInactive.Include);
+        return tonio != null ? tonio.transform.position : Vector3.zero;
+    }
+
+    static float CalculateVillageRadius(Vector3 center)
+    {
+        float furthest = 38f;
+        string[] villageParts =
+        {
+            "house", "casa", "building", "market", "stall",
+            "fountain", "fuente", "wall", "muralla", "tower",
+            "torre", "gate", "porton", "roof"
+        };
+
+        foreach (Renderer renderer in FindObjectsByType<Renderer>(
+                     FindObjectsInactive.Include))
+        {
+            if (renderer == null) continue;
+            if (!HierarchyContains(renderer.transform, villageParts))
+                continue;
+
+            Vector3 delta = renderer.bounds.center - center;
+            delta.y = 0f;
+            Vector3 extents = renderer.bounds.extents;
+            float distance = delta.magnitude +
+                             new Vector2(extents.x, extents.z).magnitude;
+            if (distance <= 75f)
+                furthest = Mathf.Max(furthest, distance + 6f);
+        }
+        return Mathf.Clamp(furthest, 38f, 64f);
+    }
+
+    static bool HierarchyContains(Transform current, string[] tokens)
+    {
+        for (int depth = 0; current != null && depth < 7;
+             depth++, current = current.parent)
+        {
+            string objectName = current.name.ToLowerInvariant();
+            foreach (string token in tokens)
+                if (objectName.Contains(token))
+                    return true;
+        }
+        return false;
+    }
+
+    static float SampleGroundHeight(Vector3 position, float fallback)
+    {
+        if (Physics.Raycast(position + Vector3.up * 80f, Vector3.down,
+                out RaycastHit hit, 180f, ~0,
+                QueryTriggerInteraction.Ignore))
+            return hit.point.y;
+        return fallback;
+    }
+
+    static void AddConstructionBeam(Transform parent, Material wood,
+        float width)
+    {
+        for (int level = 0; level < 2; level++)
+        {
+            GameObject beam = GameObject.CreatePrimitive(
+                PrimitiveType.Cube);
+            beam.name = "ConstructionBeam";
+            beam.transform.SetParent(parent, false);
+            beam.transform.localPosition =
+                new Vector3(0f, 1.15f + level * 1.45f, 0f);
+            beam.transform.localScale =
+                new Vector3(width * 1.08f, .28f, .48f);
+            beam.GetComponent<Renderer>().sharedMaterial = wood;
+            Destroy(beam.GetComponent<Collider>());
+        }
+    }
+
+    static void AddConstructionPost(Transform parent, Material wood)
+    {
+        GameObject post = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        post.name = "ConstructionPost";
+        post.transform.SetParent(parent, false);
+        post.transform.localPosition = new Vector3(0f, 1.75f, 0f);
+        post.transform.localRotation = Quaternion.Euler(0f, 0f, 4f);
+        post.transform.localScale = new Vector3(.34f, 3.7f, .55f);
+        post.GetComponent<Renderer>().sharedMaterial = wood;
+        Destroy(post.GetComponent<Collider>());
+    }
+
+    static void AddConstructionRock(Transform parent, Material stone,
+        int index)
+    {
+        GameObject rock = GameObject.CreatePrimitive(
+            PrimitiveType.Sphere);
+        rock.name = "ConstructionRock";
+        rock.transform.SetParent(parent, false);
+        rock.transform.localPosition =
+            new Vector3(0f, .38f, index % 2 == 0 ? .7f : -.7f);
+        rock.transform.localScale = new Vector3(1.5f, .76f, 1.12f);
+        rock.GetComponent<Renderer>().sharedMaterial = stone;
+        Destroy(rock.GetComponent<Collider>());
+    }
+
+    static void AddConstructionSign(Transform section)
     {
         GameObject canvasObject = new GameObject(
             "BoatStainConstructionSign", typeof(Canvas));
-        canvasObject.transform.SetParent(barrier.transform, false);
+        canvasObject.transform.SetParent(section, false);
         canvasObject.transform.localPosition = new Vector3(0f, 3.8f, 0f);
         canvasObject.transform.localRotation = Quaternion.identity;
         canvasObject.transform.localScale = Vector3.one * .012f;
