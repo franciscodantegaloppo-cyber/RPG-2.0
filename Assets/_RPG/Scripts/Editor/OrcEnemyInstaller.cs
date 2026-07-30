@@ -24,6 +24,9 @@ public static class OrcWarriorEnemySetup
     const string TexturePath =
         "Assets/Guerrero_orco/" +
         "Meshy_AI_Warrior_Orc_King_biped_texture_0.png";
+    const string BoneSwordPath =
+        "Assets/URP GanzSe Free Modular Character Pack/Prefabs/" +
+        "ONE-HANDED SWORDS/FREE ONE HANDED SWORD 3 COLOR 1.prefab";
     const string MaterialPath =
         "Assets/_RPG/Materials/OrcWarrior_URP.mat";
     const string ControllerPath =
@@ -32,7 +35,9 @@ public static class OrcWarriorEnemySetup
         "Assets/_RPG/Prefabs/Enemies/OrcWarriorEnemy.prefab";
     const string SceneObjectName = "Guerrero_Orco";
     const string MarkerName = "_OrcWarrior_Configured";
+    const string SwordName = "Orc_Bone_Sword";
     const float DesiredHeight = 2.45f;
+    static bool configuringImporters;
 
     static OrcWarriorEnemySetup()
     {
@@ -64,6 +69,8 @@ public static class OrcWarriorEnemySetup
             return;
         }
 
+        EnsureLoopingClips(AnimationPath);
+        EnsureLoopingClips(ModelPath);
         EnsureFolders();
         Material material = EnsureMaterial();
         AnimatorController controller = EnsureController();
@@ -410,6 +417,7 @@ public static class OrcWarriorEnemySetup
         animator.updateMode = AnimatorUpdateMode.Normal;
         animator.cullingMode =
             AnimatorCullingMode.CullUpdateTransforms;
+        EnsureBoneSword(root, animator);
 
         CapsuleCollider capsule = root.GetComponent<CapsuleCollider>();
         if (capsule == null)
@@ -550,6 +558,118 @@ public static class OrcWarriorEnemySetup
                  AssetDatabase.LoadAllAssetsAtPath(ModelPath))
             if (asset is Avatar avatar)
                 return avatar;
+        return null;
+    }
+
+    static void EnsureLoopingClips(string assetPath)
+    {
+        if (configuringImporters)
+            return;
+        ModelImporter importer =
+            AssetImporter.GetAtPath(assetPath) as ModelImporter;
+        if (importer == null)
+            return;
+
+        ModelImporterClipAnimation[] clips = importer.clipAnimations;
+        if (clips == null || clips.Length == 0)
+            clips = importer.defaultClipAnimations;
+        if (clips == null || clips.Length == 0)
+            return;
+
+        bool changed = false;
+        foreach (ModelImporterClipAnimation clip in clips)
+        {
+            string name = Normalized(clip.name);
+            bool locomotion =
+                name.Contains("idle") ||
+                name.Contains("walk") ||
+                name.Contains("running") ||
+                name.Contains("runfast") ||
+                name.Contains("runfast2");
+            if (!locomotion || clip.loopTime)
+                continue;
+            clip.loopTime = true;
+            clip.loopPose = true;
+            changed = true;
+        }
+        if (!changed)
+            return;
+
+        configuringImporters = true;
+        try
+        {
+            importer.clipAnimations = clips;
+            importer.SaveAndReimport();
+        }
+        finally
+        {
+            configuringImporters = false;
+        }
+    }
+
+    static void EnsureBoneSword(GameObject root, Animator animator)
+    {
+        Transform existing = FindChild(root.transform, SwordName);
+        if (existing != null)
+            return;
+
+        GameObject swordPrefab =
+            AssetDatabase.LoadAssetAtPath<GameObject>(BoneSwordPath);
+        if (swordPrefab == null)
+        {
+            Debug.LogWarning(
+                "[OrcWarrior] No se encontro la Espada de Hueso: " +
+                BoneSwordPath);
+            return;
+        }
+
+        Transform hand = null;
+        if (animator != null && animator.isHuman)
+            hand = animator.GetBoneTransform(HumanBodyBones.RightHand);
+        hand ??= FindChild(root.transform, "RightHand");
+        if (hand == null)
+        {
+            Debug.LogWarning(
+                "[OrcWarrior] No se encontro RightHand para equipar " +
+                "la Espada de Hueso.");
+            return;
+        }
+
+        GameObject sword =
+            PrefabUtility.InstantiatePrefab(swordPrefab) as GameObject;
+        if (sword == null)
+            sword = Object.Instantiate(swordPrefab);
+        sword.name = SwordName;
+        sword.transform.SetParent(hand, false);
+        sword.transform.position =
+            hand.TransformPoint(new Vector3(.018f, .055f, .005f));
+        // This sword prefab uses local +Z as its blade axis.
+        sword.transform.rotation =
+            Quaternion.LookRotation(Vector3.up, root.transform.forward);
+        sword.transform.localScale = Vector3.one * .82f;
+        sword.SetActive(true);
+
+        foreach (Renderer renderer in
+                 sword.GetComponentsInChildren<Renderer>(true))
+        {
+            renderer.enabled = true;
+            renderer.gameObject.SetActive(true);
+        }
+        foreach (Collider collider in
+                 sword.GetComponentsInChildren<Collider>(true))
+            Object.DestroyImmediate(collider);
+        foreach (Transform child in
+                 sword.GetComponentsInChildren<Transform>(true))
+            child.gameObject.layer = root.layer;
+    }
+
+    static Transform FindChild(Transform root, string name)
+    {
+        foreach (Transform child in
+                 root.GetComponentsInChildren<Transform>(true))
+            if (string.Equals(child.name, name,
+                    StringComparison.OrdinalIgnoreCase))
+                return child;
         return null;
     }
 

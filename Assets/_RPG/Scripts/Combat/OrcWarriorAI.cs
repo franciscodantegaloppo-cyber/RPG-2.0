@@ -37,6 +37,10 @@ public sealed class OrcWarriorAI : MonoBehaviour
     [SerializeField] float preferredRange = 2.15f;
     [SerializeField] float attackRange = 2.35f;
     [SerializeField] float personalSpace = 1.25f;
+    [SerializeField] float authoredWalkSpeed = 1.7f;
+    [SerializeField] float authoredRunSpeed = 4.15f;
+    [SerializeField] Vector2 locomotionPlaybackRange =
+        new Vector2(.7f, 1.55f);
 
     [Header("Combat")]
     [SerializeField] float attackCooldown = 1.55f;
@@ -533,6 +537,28 @@ public sealed class OrcWarriorAI : MonoBehaviour
         }
 
         animator.SetFloat(SpeedHash, speed, .12f, Time.deltaTime);
+
+        // Meshy locomotion is in-place. Match its foot cadence to the actual
+        // NavMesh/manual displacement so the body never glides over planted
+        // feet. Combat reactions keep their authored timing.
+        bool locomoting = !actionLocked &&
+                          state != TacticalState.Attack &&
+                          state != TacticalState.Hurt &&
+                          state != TacticalState.Dead &&
+                          speed > .08f;
+        if (!locomoting)
+        {
+            animator.speed = 1f;
+            return;
+        }
+
+        float authoredSpeed = speed > 3f
+            ? authoredRunSpeed
+            : authoredWalkSpeed;
+        animator.speed = Mathf.Clamp(
+            speed / Mathf.Max(.1f, authoredSpeed),
+            locomotionPlaybackRange.x,
+            locomotionPlaybackRange.y);
     }
 
     void ChangeState(TacticalState next, float duration = 0f)
