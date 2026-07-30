@@ -43,13 +43,18 @@ public static class GiantTreeTwoSetup
         if (existing != null)
         {
             ApplyMaterial(existing);
-            if (existing.transform.Find(ConfiguredMarker) == null)
+            Bounds currentBounds = VisualBounds(existing);
+            // Older partial imports could lose the hidden marker during a
+            // domain reload and repeatedly multiply the tree scale. Never
+            // normalize an existing authored scene object again; only repair
+            // an already-inflated instance once.
+            if (currentBounds.size.y > 42f)
             {
-                NormalizeHeight(existing);
-                PlaceNearSpawn(existing);
+                existing.transform.localScale *=
+                    21.9f / currentBounds.size.y;
                 GroundOnTerrain(existing);
-                AddConfiguredMarker(existing);
             }
+            AddConfiguredMarker(existing);
 
             EnsureTrunkCollider(existing);
             SetLayerAndStatic(existing);
