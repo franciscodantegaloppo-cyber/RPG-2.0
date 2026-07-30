@@ -392,14 +392,24 @@ public static class OrcWarriorEnemySetup
         }
 
         Animator animator = root.GetComponentInChildren<Animator>(true);
-        if (animator != null)
+        if (animator == null)
         {
-            animator.runtimeAnimatorController = controller;
-            animator.applyRootMotion = false;
-            animator.updateMode = AnimatorUpdateMode.Normal;
-            animator.cullingMode =
-                AnimatorCullingMode.CullUpdateTransforms;
+            // Meshy exports this model without an Animator component. The
+            // imported clips are bound from Armature/... and char1, so the
+            // Animator must live on Visual rather than on the enemy wrapper.
+            Transform visual = root.transform.Find("Visual");
+            GameObject animatorHost =
+                visual != null ? visual.gameObject : root;
+            animator = animatorHost.AddComponent<Animator>();
         }
+        animator.runtimeAnimatorController = controller;
+        Avatar avatar = LoadModelAvatar();
+        if (avatar != null && avatar.isValid)
+            animator.avatar = avatar;
+        animator.applyRootMotion = false;
+        animator.updateMode = AnimatorUpdateMode.Normal;
+        animator.cullingMode =
+            AnimatorCullingMode.CullUpdateTransforms;
 
         CapsuleCollider capsule = root.GetComponent<CapsuleCollider>();
         if (capsule == null)
@@ -532,6 +542,15 @@ public static class OrcWarriorEnemySetup
                             StringComparison.OrdinalIgnoreCase))
             .Distinct()
             .ToList();
+    }
+
+    static Avatar LoadModelAvatar()
+    {
+        foreach (Object asset in
+                 AssetDatabase.LoadAllAssetsAtPath(ModelPath))
+            if (asset is Avatar avatar)
+                return avatar;
+        return null;
     }
 
     static void AddClips(string path, ICollection<AnimationClip> clips)
