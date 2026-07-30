@@ -41,6 +41,11 @@ public sealed class OrcWarriorAI : MonoBehaviour
     [SerializeField] float authoredRunSpeed = 4.15f;
     [SerializeField] Vector2 locomotionPlaybackRange =
         new Vector2(.7f, 1.55f);
+    [SerializeField] float locomotionStartSpeed = .16f;
+    [SerializeField] float locomotionStopSpeed = .055f;
+    [SerializeField] float runAnimationEnterSpeed = 3.25f;
+    [SerializeField] float runAnimationExitSpeed = 2.45f;
+    [SerializeField] float animationParameterResponse = 14f;
 
     [Header("Combat")]
     [SerializeField] float attackCooldown = 1.55f;
@@ -81,6 +86,9 @@ public sealed class OrcWarriorAI : MonoBehaviour
     bool usingAgent;
     bool actionLocked;
     bool deathHandled;
+    bool locomotionActive;
+    bool usingRunAnimation;
+    float stableAnimationSpeed;
 
     bool hasSpeed;
     bool hasCombat;
@@ -202,7 +210,14 @@ public sealed class OrcWarriorAI : MonoBehaviour
             return;
         }
 
-        if (distance > preferredRange * 1.55f)
+        // Different enter/exit distances keep the tactical brain from
+        // alternating Pursue/Circle whenever it is standing on the boundary.
+        float pursueEnterDistance = preferredRange * 1.7f;
+        float pursueExitDistance = preferredRange * 1.32f;
+        bool shouldPursue = state == TacticalState.Pursue
+            ? distance > pursueExitDistance
+            : distance > pursueEnterDistance;
+        if (shouldPursue)
         {
             ChangeState(TacticalState.Pursue);
             Vector3 offset = CircleDirectionFromPlayer() *
@@ -536,7 +551,45 @@ public sealed class OrcWarriorAI : MonoBehaviour
                     Mathf.Max(Time.deltaTime, .001f);
         }
 
-        animator.SetFloat(SpeedHash, speed, .12f, Time.deltaTime);
+        // Do not feed raw NavMesh velocity directly to the controller. It
+        // fluctuates continuously while turning and used to make Walk/Run
+        // fight for control around the transition threshold.
+        if (locomotionActive)
+        {
+            if (speed <= locomotionStopSpeed)
+            {
+                locomotionActive = false;
+                usingRunAnimation = false;
+            }
+        }
+        else if (speed >= locomotionStartSpeed)
+        {
+            locomotionActive = true;
+        }
+
+        if (locomotionActive)
+        {
+            if (usingRunAnimation)
+            {
+                if (speed <= runAnimationExitSpeed)
+                    usingRunAnimation = false;
+            }
+            else if (speed >= runAnimationEnterSpeed)
+            {
+                usingRunAnimation = true;
+            }
+        }
+
+        float targetAnimationSpeed = !locomotionActive
+            ? 0f
+            : usingRunAnimation
+                ? authoredRunSpeed
+                : authoredWalkSpeed;
+        stableAnimationSpeed = Mathf.MoveTowards(
+            stableAnimationSpeed,
+            targetAnimationSpeed,
+            animationParameterResponse * Time.deltaTime);
+        animator.SetFloat(SpeedHash, stableAnimationSpeed);
 
         // Meshy locomotion is in-place. Match its foot cadence to the actual
         // NavMesh/manual displacement so the body never glides over planted
@@ -545,14 +598,14 @@ public sealed class OrcWarriorAI : MonoBehaviour
                           state != TacticalState.Attack &&
                           state != TacticalState.Hurt &&
                           state != TacticalState.Dead &&
-                          speed > .08f;
+                          locomotionActive;
         if (!locomoting)
         {
             animator.speed = 1f;
             return;
         }
 
-        float authoredSpeed = speed > 3f
+        float authoredSpeed = usingRunAnimation
             ? authoredRunSpeed
             : authoredWalkSpeed;
         animator.speed = Mathf.Clamp(
