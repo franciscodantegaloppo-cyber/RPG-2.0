@@ -1429,6 +1429,7 @@ public sealed class MissionSevenPlayerDarkAura : MonoBehaviour
 {
     const string AuraResource = "VFX/StatusEffects/DarkAura";
     const string AuraObjectName = "Mission7_PermanentDarkAura";
+    const string StatusIconKey = "mission7_darkness";
     GameObject aura;
 
     public static MissionSevenPlayerDarkAura Ensure(Transform player)
@@ -1439,7 +1440,9 @@ public sealed class MissionSevenPlayerDarkAura : MonoBehaviour
         if (effect == null)
             effect = player.gameObject
                 .AddComponent<MissionSevenPlayerDarkAura>();
+        effect.enabled = true;
         effect.Build();
+        effect.SetStatusIcon(true);
         return effect;
     }
 
@@ -1458,8 +1461,8 @@ public sealed class MissionSevenPlayerDarkAura : MonoBehaviour
         Transform orphan = player.Find(AuraObjectName);
         if (orphan != null)
             Destroy(orphan.gameObject);
-        ActiveStatusIconHUD.SetPersistent("mission7_darkness",
-            "DarkAura", false);
+        ActiveStatusIconHUD.SetPersistent(StatusIconKey, "DarkAura",
+            false);
     }
 
     void Awake()
@@ -1470,8 +1473,7 @@ public sealed class MissionSevenPlayerDarkAura : MonoBehaviour
     void OnEnable()
     {
         Build();
-        ActiveStatusIconHUD.SetPersistent("mission7_darkness",
-            "DarkAura", true, "Oscuridad interior");
+        SetStatusIcon(true);
     }
 
     void Build()
@@ -1539,14 +1541,23 @@ public sealed class MissionSevenPlayerDarkAura : MonoBehaviour
             particles.Play(true);
         }
 
-        ActiveStatusIconHUD.SetPersistent("mission7_darkness",
-            "DarkAura", true, "Oscuridad interior");
+        SetStatusIcon(true);
     }
 
     void OnDisable()
     {
-        ActiveStatusIconHUD.SetPersistent("mission7_darkness",
-            "DarkAura", false);
+        SetStatusIcon(false);
+    }
+
+    void OnDestroy()
+    {
+        SetStatusIcon(false);
+    }
+
+    void SetStatusIcon(bool active)
+    {
+        ActiveStatusIconHUD.SetPersistent(StatusIconKey, "DarkAura",
+            active, active ? "Aura oscura" : null);
     }
 
     void RemoveVisuals()
@@ -1559,7 +1570,6 @@ public sealed class MissionSevenPlayerDarkAura : MonoBehaviour
         InsectoidCrabDarkAura fallback =
             GetComponent<InsectoidCrabDarkAura>();
         fallback?.SetAuraActive(false);
-        ActiveStatusIconHUD.SetPersistent("mission7_darkness",
-            "DarkAura", false);
+        SetStatusIcon(false);
     }
 }
