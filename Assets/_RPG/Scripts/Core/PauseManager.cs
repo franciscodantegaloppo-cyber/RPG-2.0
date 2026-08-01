@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -14,11 +15,20 @@ public class PauseManager : MonoBehaviour
     Slider fogSlider;
     TextMeshProUGUI fogValueLabel;
     TextMeshProUGUI graphicsValueLabel;
+    TextMeshProUGUI particleOptionLabel;
+    TextMeshProUGUI shadowOptionLabel;
     GameObject fogControl;
     GameObject graphicsControl;
     GameObject audioControl;
     GameState stateBeforePause;
     bool isPaused;
+    bool particlesEnabled = true;
+    int shadowQualityLevel = 2;
+    float nextParticleSweep;
+    readonly Dictionary<ParticleSystem, bool> particleWasPlaying =
+        new Dictionary<ParticleSystem, bool>();
+    readonly Dictionary<ParticleSystemRenderer, bool> particleRendererState =
+        new Dictionary<ParticleSystemRenderer, bool>();
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void Bootstrap()
@@ -35,11 +45,29 @@ public class PauseManager : MonoBehaviour
     {
         if (instance != null && instance != this) { Destroy(gameObject); return; }
         instance = this;
-        ApplyGraphicsProfile((GraphicsProfile)Mathf.Clamp(PlayerPrefs.GetInt("GraphicsProfile", 1), 0, 2));
+        GraphicsProfile profile = (GraphicsProfile)Mathf.Clamp(
+            PlayerPrefs.GetInt("GraphicsProfile", 1), 0, 2);
+        ApplyGraphicsProfile(profile, false);
+        int defaultShadow = profile == GraphicsProfile.Low ? 0 :
+            profile == GraphicsProfile.Medium ? 2 : 3;
+        ApplyShadowQuality(Mathf.Clamp(
+            PlayerPrefs.GetInt("ShadowQualityLevel", defaultShadow), 0, 3),
+            false);
+        particlesEnabled = PlayerPrefs.GetInt("ParticlesEnabled", 1) != 0;
+        ApplyParticlesEnabled(particlesEnabled, false);
     }
 
     void Update()
     {
+        // New VFX can be instantiated after the option was changed. Sweep at
+        // a low unscaled frequency so disabled particles stay disabled without
+        // adding meaningful per-frame cost.
+        if (!particlesEnabled && Time.unscaledTime >= nextParticleSweep)
+        {
+            nextParticleSweep = Time.unscaledTime + .4f;
+            DisableCurrentParticleSystems();
+        }
+
         Keyboard kb = Keyboard.current;
         if (RuntimeChatConsole.IsTyping)
             return;
@@ -72,6 +100,7 @@ public class PauseManager : MonoBehaviour
         BuildIfNeeded();
         SyncFogSliderToCurrentValue();
         SyncGraphicsLabel();
+        SyncAdvancedGraphicsLabels();
         panel.SetActive(true);
     }
 
@@ -364,16 +393,42 @@ public class PauseManager : MonoBehaviour
         groupRect.anchorMin = new Vector2(0.5f, 0.46f);
         groupRect.anchorMax = new Vector2(0.5f, 0.46f);
         groupRect.pivot = new Vector2(0.5f, 0.5f);
-        groupRect.sizeDelta = new Vector2(900f, 250f);
+        groupRect.sizeDelta = new Vector2(900f, 360f);
 
         TextMeshProUGUI title = CreatePauseLabel(group.transform, "GraphicsTitle", "GRAFICOS", 26f, 14f,
-            new Vector2(0f, 78f), new Vector2(520f, 30f));
+            new Vector2(0f, 145f), new Vector2(520f, 30f));
         title.rectTransform.anchorMin = title.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
         title.color = new Color(.94f, .72f, .24f);
 
-        CreateGraphicsButton(group.transform, "LowGraphics", "BAJO", new Vector2(-180f, 5f), () => ApplyGraphicsProfile(GraphicsProfile.Low));
-        CreateGraphicsButton(group.transform, "MediumGraphics", "MEDIO", new Vector2(0f, 0f), () => ApplyGraphicsProfile(GraphicsProfile.Medium));
-        CreateGraphicsButton(group.transform, "HighGraphics", "ALTO", new Vector2(180f, 5f), () => ApplyGraphicsProfile(GraphicsProfile.High));
+        CreateGraphicsButton(group.transform, "LowGraphics", "BAJO", new Vector2(-180f, 88f), () => ApplyGraphicsProfile(GraphicsProfile.Low));
+        CreateGraphicsButton(group.transform, "MediumGraphics", "MEDIO", new Vector2(0f, 88f), () => ApplyGraphicsProfile(GraphicsProfile.Medium));
+        CreateGraphicsButton(group.transform, "HighGraphics", "ALTO", new Vector2(180f, 88f), () => ApplyGraphicsProfile(GraphicsProfile.High));
+
+        TextMeshProUGUI particleTitle = CreatePauseLabel(group.transform,
+            "ParticleTitle", "EFECTOS DE PARTICULAS", 17f, 12f,
+            new Vector2(-245f, 22f), new Vector2(300f, 30f));
+        particleTitle.rectTransform.anchorMin = particleTitle.rectTransform.anchorMax =
+            new Vector2(.5f, .5f);
+        Button particleButton = CreateGraphicsButton(group.transform,
+            "ParticleToggle", "PARTICULAS", new Vector2(180f, 22f),
+            ToggleParticles);
+        particleButton.GetComponent<RectTransform>().sizeDelta =
+            new Vector2(260f, 38f);
+        particleOptionLabel =
+            particleButton.GetComponentInChildren<TextMeshProUGUI>(true);
+
+        TextMeshProUGUI shadowTitle = CreatePauseLabel(group.transform,
+            "ShadowTitle", "CALIDAD DE SOMBRAS", 17f, 12f,
+            new Vector2(-245f, -42f), new Vector2(300f, 30f));
+        shadowTitle.rectTransform.anchorMin = shadowTitle.rectTransform.anchorMax =
+            new Vector2(.5f, .5f);
+        Button shadowButton = CreateGraphicsButton(group.transform,
+            "ShadowQuality", "SOMBRAS", new Vector2(180f, -42f),
+            CycleShadowQuality);
+        shadowButton.GetComponent<RectTransform>().sizeDelta =
+            new Vector2(260f, 38f);
+        shadowOptionLabel =
+            shadowButton.GetComponentInChildren<TextMeshProUGUI>(true);
 
         GameObject valueGo = new GameObject("GraphicsValue", typeof(RectTransform));
         valueGo.transform.SetParent(group.transform, false);
@@ -385,7 +440,8 @@ public class PauseManager : MonoBehaviour
         RectTransform valueRect = graphicsValueLabel.rectTransform;
         valueRect.anchorMin = valueRect.anchorMax = new Vector2(.5f, .5f);
         valueRect.sizeDelta = new Vector2(540f, 26f);
-        valueRect.anchoredPosition = new Vector2(0f, -72f);
+        valueRect.anchoredPosition = new Vector2(0f, -137f);
+        SyncAdvancedGraphicsLabels();
     }
 
     void BuildAudioControl(Transform parent)
@@ -437,7 +493,7 @@ public class PauseManager : MonoBehaviour
         return slider;
     }
 
-    static void CreateGraphicsButton(Transform parent, string name, string text, Vector2 position, UnityEngine.Events.UnityAction action)
+    static Button CreateGraphicsButton(Transform parent, string name, string text, Vector2 position, UnityEngine.Events.UnityAction action)
     {
         Button button = SharpUIRuntimeFactory.CreateRectButton(
             parent, name, text, action, 38f);
@@ -454,11 +510,12 @@ public class PauseManager : MonoBehaviour
             label.fontSize = 18f;
             label.color = Color.white;
         }
+        return button;
     }
 
     enum GraphicsProfile { Low, Medium, High }
 
-    void ApplyGraphicsProfile(GraphicsProfile profile)
+    void ApplyGraphicsProfile(GraphicsProfile profile, bool persist = true)
     {
         // These settings are supported in URP and apply immediately without recreating the
         // scene. Render scale especially gives a large performance gain on weaker hardware.
@@ -473,7 +530,6 @@ public class PauseManager : MonoBehaviour
                 QualitySettings.antiAliasing = 0;
                 QualitySettings.anisotropicFiltering = AnisotropicFiltering.Disable;
                 Application.targetFrameRate = 60;
-                PlayerPrefs.SetInt("GraphicsProfile", 0);
                 break;
             case GraphicsProfile.Medium:
                 ScalableBufferManager.ResizeBuffers(.85f, .85f);
@@ -484,7 +540,6 @@ public class PauseManager : MonoBehaviour
                 QualitySettings.antiAliasing = 2;
                 QualitySettings.anisotropicFiltering = AnisotropicFiltering.Enable;
                 Application.targetFrameRate = 60;
-                PlayerPrefs.SetInt("GraphicsProfile", 1);
                 break;
             default:
                 ScalableBufferManager.ResizeBuffers(1f, 1f);
@@ -495,10 +550,15 @@ public class PauseManager : MonoBehaviour
                 QualitySettings.antiAliasing = 4;
                 QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
                 Application.targetFrameRate = -1;
-                PlayerPrefs.SetInt("GraphicsProfile", 2);
                 break;
         }
-        PlayerPrefs.Save();
+        if (persist)
+        {
+            PlayerPrefs.SetInt("GraphicsProfile", (int)profile);
+            ApplyShadowQuality(profile == GraphicsProfile.Low ? 0 :
+                profile == GraphicsProfile.Medium ? 2 : 3, true);
+            PlayerPrefs.Save();
+        }
         SyncGraphicsLabel();
     }
 
@@ -511,6 +571,130 @@ public class PauseManager : MonoBehaviour
             0 => "Bajo: maximo rendimiento (sombras desactivadas)",
             2 => "Alto: maxima calidad visual",
             _ => "Medio: calidad y rendimiento equilibrados"
+        };
+    }
+
+    void ToggleParticles()
+    {
+        ApplyParticlesEnabled(!particlesEnabled, true);
+    }
+
+    void ApplyParticlesEnabled(bool enabled, bool persist)
+    {
+        particlesEnabled = enabled;
+        if (enabled)
+            RestoreParticleSystems();
+        else
+            DisableCurrentParticleSystems();
+
+        if (persist)
+        {
+            PlayerPrefs.SetInt("ParticlesEnabled", enabled ? 1 : 0);
+            PlayerPrefs.Save();
+        }
+        SyncAdvancedGraphicsLabels();
+    }
+
+    void DisableCurrentParticleSystems()
+    {
+        foreach (ParticleSystem system in
+                 FindObjectsByType<ParticleSystem>(FindObjectsInactive.Include))
+        {
+            if (system == null)
+                continue;
+            if (!particleWasPlaying.ContainsKey(system))
+                particleWasPlaying[system] = system.isPlaying;
+
+            ParticleSystemRenderer renderer =
+                system.GetComponent<ParticleSystemRenderer>();
+            if (renderer != null)
+            {
+                if (!particleRendererState.ContainsKey(renderer))
+                    particleRendererState[renderer] = renderer.enabled;
+                renderer.enabled = false;
+            }
+            system.Stop(true,
+                ParticleSystemStopBehavior.StopEmittingAndClear);
+        }
+    }
+
+    void RestoreParticleSystems()
+    {
+        foreach (KeyValuePair<ParticleSystemRenderer, bool> pair in
+                 particleRendererState)
+            if (pair.Key != null)
+                pair.Key.enabled = pair.Value;
+
+        foreach (KeyValuePair<ParticleSystem, bool> pair in particleWasPlaying)
+            if (pair.Key != null && pair.Value && pair.Key.gameObject.activeInHierarchy)
+                pair.Key.Play(true);
+
+        particleRendererState.Clear();
+        particleWasPlaying.Clear();
+    }
+
+    void CycleShadowQuality()
+    {
+        // Each click reduces one step; after Off it returns to High.
+        int next = shadowQualityLevel <= 0 ? 3 : shadowQualityLevel - 1;
+        ApplyShadowQuality(next, true);
+    }
+
+    void ApplyShadowQuality(int level, bool persist)
+    {
+        level = Mathf.Clamp(level, 0, 3);
+        shadowQualityLevel = level;
+        switch (level)
+        {
+            case 0:
+                QualitySettings.shadows = ShadowQuality.Disable;
+                QualitySettings.shadowDistance = 0f;
+                QualitySettings.shadowResolution = ShadowResolution.Low;
+                QualitySettings.shadowCascades = 0;
+                break;
+            case 1:
+                QualitySettings.shadows = ShadowQuality.HardOnly;
+                QualitySettings.shadowDistance = 22f;
+                QualitySettings.shadowResolution = ShadowResolution.Low;
+                QualitySettings.shadowCascades = 0;
+                break;
+            case 2:
+                QualitySettings.shadows = ShadowQuality.All;
+                QualitySettings.shadowDistance = 45f;
+                QualitySettings.shadowResolution = ShadowResolution.Medium;
+                QualitySettings.shadowCascades = 2;
+                break;
+            default:
+                QualitySettings.shadows = ShadowQuality.All;
+                QualitySettings.shadowDistance = 75f;
+                QualitySettings.shadowResolution = ShadowResolution.High;
+                QualitySettings.shadowCascades = 4;
+                break;
+        }
+
+        if (persist)
+        {
+            PlayerPrefs.SetInt("ShadowQualityLevel", level);
+            PlayerPrefs.Save();
+        }
+        SyncAdvancedGraphicsLabels();
+    }
+
+    void SyncAdvancedGraphicsLabels()
+    {
+        if (particleOptionLabel != null)
+            particleOptionLabel.text = particlesEnabled
+                ? "PARTICULAS: SI"
+                : "PARTICULAS: NO";
+
+        if (shadowOptionLabel == null)
+            return;
+        shadowOptionLabel.text = shadowQualityLevel switch
+        {
+            0 => "SOMBRAS: NO",
+            1 => "SOMBRAS: BAJA",
+            2 => "SOMBRAS: MEDIA",
+            _ => "SOMBRAS: ALTA"
         };
     }
 }

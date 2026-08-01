@@ -32,11 +32,9 @@ public class CombatSystem : MonoBehaviour
     static readonly int[] swordActions   = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
 
     int comboStep;
-    int activeSwordAction;
     float lastAttackTime;
     bool attackLocked;
     bool activeAttackHasSword;
-    bool slashPlayedForAttack;
     bool activeAttackHitProcessed;
     int attackSequence;
 
@@ -118,9 +116,7 @@ public class CombatSystem : MonoBehaviour
         bool hasSword = weaponSocket?.HasWeaponEquipped() ?? false;
         int[] actions = hasSword ? swordActions : unarmedActions;
         int action = actions[comboStep % actions.Length];
-        activeSwordAction = action;
         activeAttackHasSword = hasSword;
-        slashPlayedForAttack = false;
         activeAttackHitProcessed = false;
         attackSequence++;
 
@@ -128,7 +124,8 @@ public class CombatSystem : MonoBehaviour
         bool movingSwordAttack = hasSword && playerController != null &&
                                  playerController.IsMoving &&
                                  playerController.IsGrounded;
-        animBridge?.TriggerAttack(action, WeaponAttackSpeedMultiplier,
+        animBridge?.TriggerAttack(action,
+            ActionSpeedMultiplier * WeaponAttackSpeedMultiplier,
             movingSwordAttack);
         weaponDrawSystem?.NotifyWeaponUsed();
 
@@ -154,9 +151,7 @@ public class CombatSystem : MonoBehaviour
             float visualAttackDuration = attackAnimationDuration /
                 Mathf.Max(.01f, visualAttackSpeed);
             weaponSocket.BeginMeasuredSlash(visualAttackDuration, visualAttackSpeed);
-            // The slash is now the complete trajectory painted by the real sword tip.
-            // Prevent the old single prefab from being spawned again at the hit event.
-            slashPlayedForAttack = true;
+            // The slash is the trajectory painted by the real sword tip.
         }
 
         ItemInstance weaponInstance = EquipmentManager.Instance?.GetEquippedInstance(ItemType.Weapon);
@@ -189,14 +184,8 @@ public class CombatSystem : MonoBehaviour
         float rangePct = weaponInstance?.GetAffixValue(AffixType.WeaponRangePercent) ?? 0f;
         float rangeMultiplier = 1f + rangePct / 100f;
 
-        if (activeAttackHasSword && !slashPlayedForAttack &&
-            weaponSocket?.GetCurrentWeapon() != null)
-        {
-            slashPlayedForAttack = true;
-            StylizedSwordSlashVfx.Play(transform, weaponSocket, activeSwordAction,
-                rangeMultiplier,
-                ActionSpeedMultiplier * WeaponAttackSpeedMultiplier);
-        }
+        // The measured trail is sampled from the rendered handle and tip each
+        // frame. Never spawn the legacy red prefab with independent timing.
 
         Vector3 origin = transform.position + transform.forward * (hitOffset * rangeMultiplier) + Vector3.up * 1f;
         Collider[] hits = Physics.OverlapSphere(origin, hitRadius * rangeMultiplier, enemyMask);
