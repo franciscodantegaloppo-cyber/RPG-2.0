@@ -104,6 +104,7 @@ public class SkeletonSpawner : MonoBehaviour
 
         GameObject prefab = skeletonPrefabs[Random.Range(0, skeletonPrefabs.Length)];
         GameObject instance = Instantiate(prefab, position, Quaternion.Euler(0f, Random.Range(0f, 360f), 0f));
+        SpawnedEnemyLifetimeLimiter.Ensure(instance, transform.position);
         spawnedCount++;
 
         // Rarest first - a 3-star roll shouldn't also register as a cheaper 1-star/2-star spawn,

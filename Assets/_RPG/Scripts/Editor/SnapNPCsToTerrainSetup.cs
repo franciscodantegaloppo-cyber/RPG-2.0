@@ -87,14 +87,40 @@ public static class SnapNPCsToTerrainSetup
         NPCVisualGroundAligner aligner = npc.GetComponent<NPCVisualGroundAligner>();
         if (aligner == null)
             aligner = npc.AddComponent<NPCVisualGroundAligner>();
-        aligner.Configure(DefaultGroundOffset);
 
-        snapper.SnapNow();
+        // Recover a visual root that an earlier ground aligner may already have displaced far
+        // from its owner. Keeping that inherited offset would make the root remain in the sky
+        // even if the rendered merchant happened to be drawn near the floor.
+        Animator animator = npc.GetComponentInChildren<Animator>(true);
+        if (animator != null && animator.transform != npc.transform)
+        {
+            Vector3 localVisualPosition = animator.transform.localPosition;
+            localVisualPosition.y = 0f;
+            animator.transform.localPosition = localVisualPosition;
+        }
+
+        // Always recover the root from the actual Terrain first. A market roof/counter is an
+        // obstacle and must never become the merchant's saved ground height.
+        Terrain terrain = FindTerrainAt(npc.transform.position);
+        if (terrain != null && snapper.TryGetVisualBottomY(out float currentBottom))
+        {
+            float terrainY = terrain.SampleHeight(npc.transform.position) +
+                             terrain.transform.position.y;
+            Vector3 position = npc.transform.position;
+            position.y += terrainY + DefaultGroundOffset - currentBottom;
+            bool enabled = controller.enabled;
+            controller.enabled = false;
+            npc.transform.position = position;
+            controller.enabled = enabled;
+        }
+        else
+            snapper.SnapNow();
+        aligner.Configure(DefaultGroundOffset);
         aligner.AlignNow();
         EditorUtility.SetDirty(npc);
 
         float groundDelta = 0f;
-        Terrain terrain = Terrain.activeTerrain;
+        terrain = FindTerrainAt(npc.transform.position);
         if (terrain != null && snapper.TryGetVisualBottomY(out float bottomY))
         {
             float terrainY = terrain.SampleHeight(npc.transform.position) + terrain.transform.position.y;
@@ -103,6 +129,21 @@ public static class SnapNPCsToTerrainSetup
 
         Debug.Log("[SnapNPCsToTerrain] " + label + " -> " + npc.transform.position +
             " visual/terreno delta: " + groundDelta.ToString("0.000"));
+    }
+
+    static Terrain FindTerrainAt(Vector3 position)
+    {
+        foreach (Terrain terrain in Terrain.activeTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null)
+                continue;
+            Vector3 local = position - terrain.transform.position;
+            Vector3 size = terrain.terrainData.size;
+            if (local.x >= 0f && local.z >= 0f &&
+                local.x <= size.x && local.z <= size.z)
+                return terrain;
+        }
+        return null;
     }
 
     static void SetSerialized(Object target, string propertyName, float value)

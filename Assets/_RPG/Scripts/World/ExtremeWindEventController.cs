@@ -10,12 +10,18 @@ using UnityEngine.UI;
 public sealed class ExtremeWindEventController : MonoBehaviour
 {
     public static ExtremeWindEventController Instance { get; private set; }
-    const float EffectRadius = 60f;
-    const int MaxAffectedProps = 420;
-    const int MaxNearbyColliders = 2048;
-    const int MaxUprootedTrees = 48;
-    const int MaxWallDebris = 180;
-    const float ActivationInterval = .055f;
+    // The destructive simulation is intentionally local. A previous 60 m / 420-body
+    // configuration kept hundreds of continuous rigidbodies awake at once and became
+    // progressively slower during the gust.
+    const float EffectRadius = 30f;
+    const int MaxAffectedProps = 190;
+    const int MaxNearbyColliders = 1024;
+    const int MaxUprootedTrees = 28;
+    const int MaxWallDebris = 56;
+    const float ActivationInterval = .045f;
+    const float WindPhysicsInterval = .05f;
+    const float DynamicForceLifetimeMin = 5f;
+    const float DynamicForceLifetimeMax = 11f;
 
     sealed class PropSnapshot
     {
@@ -40,6 +46,7 @@ public sealed class ExtremeWindEventController : MonoBehaviour
         public bool terrainTree;
         public Collider fallbackCollider;
         public WindDynamicColliderAdapter colliderAdapter;
+        public float dynamicUntil;
     }
 
     sealed class TerrainWindSnapshot
@@ -72,9 +79,12 @@ public sealed class ExtremeWindEventController : MonoBehaviour
     TenkokuDayNightCycle cycle;
     int restorationDay = -1;
     Coroutine eventRoutine;
+    Coroutine discoveryRoutine;
     PlayerStats playerStats;
     float nextPlayerLookup;
     float nextPropActivation;
+    float nextWindPhysicsUpdate;
+    float nextLeafVisualUpdate;
     float activeGustDuration = 300f;
     Vector3 eventCentre;
     Transform fountainRoot;
@@ -113,8 +123,16 @@ public sealed class ExtremeWindEventController : MonoBehaviour
             RestoreVillage();
 
         if (!EventActive || WindManager.Instance == null) return;
-        ApplyContinuousWind();
-        UpdateFlyingLeaves();
+        if (Time.time >= nextWindPhysicsUpdate)
+        {
+            nextWindPhysicsUpdate = Time.time + WindPhysicsInterval;
+            ApplyContinuousWind();
+        }
+        if (Time.time >= nextLeafVisualUpdate)
+        {
+            nextLeafVisualUpdate = Time.time + .1f;
+            UpdateFlyingLeaves();
+        }
     }
 
     public void StartExtremeGust(float warningSeconds = 10f,
@@ -151,12 +169,18 @@ public sealed class ExtremeWindEventController : MonoBehaviour
             StopCoroutine(eventRoutine);
             eventRoutine = null;
         }
+        if (discoveryRoutine != null)
+        {
+            StopCoroutine(discoveryRoutine);
+            discoveryRoutine = null;
+        }
         warningGroup?.gameObject.SetActive(false);
         WindManager.Instance?.StopExtremeGust();
         if (flyingLeaves != null)
             flyingLeaves.Stop(true,
                 ParticleSystemStopBehavior.StopEmittingAndClear);
         EventActive = false;
+        SetDebrisAtRest();
         if (wasRunning)
             ExtremeGustEnded?.Invoke();
     }
@@ -182,8 +206,11 @@ public sealed class ExtremeWindEventController : MonoBehaviour
         activeGustDuration = Mathf.Max(1f, durationSeconds);
         DisableFountainWater();
         CaptureVillageProps();
+        nextWindPhysicsUpdate = Time.time;
+        nextLeafVisualUpdate = Time.time;
         EventActive = true;
-        StartCoroutine(DiscoverColliderlessProps(eventCentre));
+        discoveryRoutine =
+            StartCoroutine(DiscoverColliderlessProps(eventCentre));
         restorationDay = cycle != null ? cycle.WorldDay : 0;
         WindManager.Instance?.BeginExtremeGust(durationSeconds);
         if (flyingLeaves != null)
@@ -200,10 +227,38 @@ public sealed class ExtremeWindEventController : MonoBehaviour
 
         WindManager.Instance?.StopExtremeGust();
         if (flyingLeaves != null)
-            flyingLeaves.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+            flyingLeaves.Stop(true,
+                ParticleSystemStopBehavior.StopEmittingAndClear);
         EventActive = false;
+        SetDebrisAtRest();
         eventRoutine = null;
+        discoveryRoutine = null;
         ExtremeGustEnded?.Invoke();
+    }
+
+    void SetDebrisAtRest()
+    {
+        foreach (PropSnapshot entry in affected)
+        {
+            if (entry == null || !entry.activated ||
+                entry.body == null) continue;
+            entry.body.linearVelocity = Vector3.zero;
+            entry.body.angularVelocity = Vector3.zero;
+            entry.body.Sleep();
+            entry.body.isKinematic = true;
+        }
+        foreach (GameObject debris in spawnedWallDebris)
+        {
+            if (debris == null) continue;
+            foreach (Rigidbody body in
+                     debris.GetComponentsInChildren<Rigidbody>(true))
+            {
+                body.linearVelocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+                body.Sleep();
+                body.isKinematic = true;
+            }
+        }
     }
 
     void CaptureVillageProps()
@@ -215,7 +270,9 @@ public sealed class ExtremeWindEventController : MonoBehaviour
         eventCentre = playerObject != null
             ? playerObject.transform.position
             : Vector3.zero;
+        CaptureMedievalMarketProps();
         int capturedTrees = 0;
+        CaptureSceneTrees(eventCentre, ref capturedTrees);
         int colliderCount = Physics.OverlapSphereNonAlloc(eventCentre,
             EffectRadius, nearbyColliders, ~0, QueryTriggerInteraction.Ignore);
         // Structures are captured first so abundant grass and loose props can
@@ -260,7 +317,8 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                 bool roofPiece = IsRoofPiece(name);
                 bool wallPiece = IsWallPiece(name);
                 bool housePiece = IsHousePiece(name);
-                bool woodFramePiece = housePiece && IsWoodFramePiece(name);
+                bool wooden = IsWoodFramePiece(name);
+                bool woodFramePiece = housePiece && wooden;
                 bool structure = roofPiece || wallPiece || housePiece ||
                     woodFramePiece || ContainsAny(name, "fence", "palisade",
                         "barricade", "building", "edificio", "tower", "torre",
@@ -288,10 +346,15 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                 Rigidbody body = root.GetComponent<Rigidbody>();
                 bool originalKinematic = body != null && body.isKinematic;
                 float releaseProgress;
+                bool smallLooseProp = !structure && size <= 3.2f;
                 if (structure)
-                    releaseProgress = Random.Range(0f, .012f);
+                    releaseProgress = wooden
+                        ? Random.Range(0f, .005f)
+                        : Random.Range(0f, .012f);
                 else if (tree)
-                    releaseProgress = Random.Range(0f, .045f);
+                    releaseProgress = Random.Range(.002f, .018f);
+                else if (wooden || smallLooseProp)
+                    releaseProgress = Random.Range(0f, .012f);
                 else
                     releaseProgress = Random.Range(0f, .085f);
 
@@ -319,8 +382,10 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                         ? Random.Range(.025f, .06f)
                         : roofPiece
                             ? Random.Range(.005f, .035f)
+                            : wooden
+                                ? Random.Range(.003f, .025f)
                             : wallPiece || woodFramePiece
-                                ? Random.Range(.04f, .19f)
+                                ? Random.Range(.025f, .12f)
                                 : Random.Range(.055f, .198f)
                     : 0f,
                 size = size,
@@ -334,6 +399,132 @@ public sealed class ExtremeWindEventController : MonoBehaviour
             a.releaseProgress.CompareTo(b.releaseProgress));
         CaptureTerrainTrees(eventCentre, ref capturedTrees);
         nextPropActivation = Time.time;
+    }
+
+    void CaptureMedievalMarketProps()
+    {
+        GameObject staging = GameObject.Find("Medieval_Market_Staging");
+        if (staging == null)
+            return;
+
+        foreach (Transform marketProp in staging.transform)
+        {
+            if (marketProp == null || capturedRoots.Contains(marketProp) ||
+                affected.Count >= MaxAffectedProps)
+                continue;
+
+            Vector3 flatOffset = marketProp.position - eventCentre;
+            flatOffset.y = 0f;
+            if (flatOffset.sqrMagnitude > EffectRadius * EffectRadius)
+                continue;
+
+            Renderer[] renderers =
+                marketProp.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0)
+                continue;
+            Bounds bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+                bounds.Encapsulate(renderers[i].bounds);
+
+            string name = HierarchyName(marketProp);
+            bool stall = ContainsAny(name, "stall", "puesto");
+            bool cart = ContainsAny(name, "cart", "carro");
+            bool heavy = stall || cart;
+            Rigidbody body = marketProp.GetComponent<Rigidbody>();
+            float size = bounds.size.magnitude;
+
+            // Bags, baskets and jars leave first. Crates/barrels follow, the cart requires a
+            // stronger gust and complete stalls bend briefly before their anchors tear free.
+            float releaseProgress = stall
+                ? Random.Range(.035f, .085f)
+                : cart
+                    ? Random.Range(.025f, .075f)
+                    : Random.Range(.004f, .045f);
+            affected.Add(new PropSnapshot
+            {
+                transform = marketProp,
+                position = marketProp.position,
+                rotation = marketProp.rotation,
+                localPosition = marketProp.localPosition,
+                localRotation = marketProp.localRotation,
+                scale = marketProp.localScale,
+                body = body,
+                bodyCreated = false,
+                originalKinematic = body != null && body.isKinematic,
+                originalUseGravity = body == null || body.useGravity,
+                originalConstraints = body != null
+                    ? body.constraints
+                    : RigidbodyConstraints.None,
+                structural = stall,
+                heavyStructure = heavy,
+                activated = false,
+                releaseProgress = releaseProgress,
+                breakProgress = stall
+                    ? Random.Range(.10f, .19f)
+                    : 0f,
+                size = size,
+                lowerName = name
+            });
+            capturedRoots.Add(marketProp);
+        }
+    }
+
+    void CaptureSceneTrees(Vector3 centre, ref int capturedTrees)
+    {
+        // SpawnVillage contains both Terrain trees and ordinary prefab trees. The latter were
+        // easy to miss when they had no collider, so capture them explicitly before loose props
+        // consume the budget.
+        foreach (Renderer renderer in
+                 FindObjectsByType<Renderer>(FindObjectsInactive.Exclude))
+        {
+            if (capturedTrees >= MaxUprootedTrees ||
+                affected.Count >= MaxAffectedProps)
+                break;
+            if (renderer == null || renderer is ParticleSystemRenderer ||
+                renderer is TrailRenderer || renderer is LineRenderer ||
+                renderer.GetComponentInParent<Terrain>() != null)
+                continue;
+
+            string rendererHierarchy = HierarchyName(renderer.transform);
+            if (!ContainsAny(rendererHierarchy, "tree", "arbol", "pine",
+                    "spruce", "fir", "pino"))
+                continue;
+
+            Transform root = FindMovableRoot(renderer.transform);
+            if (root == null || capturedRoots.Contains(root) ||
+                IsCharacterOrCreature(root) ||
+                root.GetComponentInChildren<EnemyStats>() != null)
+                continue;
+            Vector3 flat = root.position - centre;
+            flat.y = 0f;
+            if (flat.sqrMagnitude > EffectRadius * EffectRadius)
+                continue;
+
+            Rigidbody body = root.GetComponent<Rigidbody>();
+            affected.Add(new PropSnapshot
+            {
+                transform = root,
+                position = root.position,
+                rotation = root.rotation,
+                localPosition = root.localPosition,
+                localRotation = root.localRotation,
+                scale = root.localScale,
+                body = body,
+                originalKinematic = body != null && body.isKinematic,
+                originalUseGravity = body == null || body.useGravity,
+                originalConstraints = body != null
+                    ? body.constraints
+                    : RigidbodyConstraints.None,
+                structural = false,
+                heavyStructure = false,
+                activated = false,
+                releaseProgress = Random.Range(.002f, .018f),
+                size = renderer.bounds.size.magnitude,
+                lowerName = rendererHierarchy
+            });
+            capturedRoots.Add(root);
+            capturedTrees++;
+        }
     }
 
     void CaptureTerrainTrees(Vector3 centre, ref int capturedTrees)
@@ -433,7 +624,7 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                     structural = false,
                     activated = false,
                     terrainTree = true,
-                    releaseProgress = Random.Range(0f, .045f),
+                    releaseProgress = Random.Range(.002f, .018f),
                     size = size,
                     lowerName = treeObject.name.ToLowerInvariant()
                 });
@@ -490,7 +681,8 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                 bool roofPiece = IsRoofPiece(name);
                 bool wallPiece = IsWallPiece(name);
                 bool housePiece = IsHousePiece(name);
-                bool woodFramePiece = housePiece && IsWoodFramePiece(name);
+                bool wooden = IsWoodFramePiece(name);
+                bool woodFramePiece = housePiece && wooden;
                 bool structure = roofPiece || wallPiece || housePiece ||
                     woodFramePiece || ContainsAny(name, "fence", "palisade",
                         "barricade", "building", "edificio", "tower", "torre",
@@ -505,9 +697,14 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                     structure = true;
                     heavyStructure = true;
                 }
+                bool smallLooseProp = !structure && size <= 3.2f;
                 float release = structure
-                    ? Random.Range(0f, .012f)
-                    : Random.Range(0f, .085f);
+                    ? wooden
+                        ? Random.Range(0f, .005f)
+                        : Random.Range(0f, .012f)
+                    : wooden || smallLooseProp
+                        ? Random.Range(0f, .012f)
+                        : Random.Range(0f, .085f);
                 Rigidbody existingBody = root.GetComponent<Rigidbody>();
                 affected.Add(new PropSnapshot
                 {
@@ -534,8 +731,10 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                             ? Random.Range(.025f, .06f)
                             : roofPiece
                                 ? Random.Range(.005f, .035f)
+                                : wooden
+                                    ? Random.Range(.003f, .025f)
                                 : wallPiece || woodFramePiece
-                                    ? Random.Range(.04f, .19f)
+                                    ? Random.Range(.025f, .12f)
                                     : Random.Range(.055f, .198f)
                         : 0f,
                     size = size,
@@ -553,6 +752,7 @@ public sealed class ExtremeWindEventController : MonoBehaviour
     {
         Vector3 direction = WindManager.Instance.WindDirection;
         float strength = WindManager.Instance.CurrentStrength01;
+        float simulationStep = WindPhysicsInterval;
         float elapsedFactor = 1f -
             Mathf.Clamp01(WindManager.Instance.ExtremeGustRemaining /
                           activeGustDuration);
@@ -580,7 +780,8 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                     Quaternion.AngleAxis(bend * localProgress,
                         Vector3.Cross(Vector3.up, direction).normalized);
                 entry.transform.rotation = Quaternion.Slerp(
-                    entry.transform.rotation, target, Time.deltaTime * .3f);
+                    entry.transform.rotation, target,
+                    simulationStep * .3f);
                 // Each modular wall/roof piece starts at a different moment and can
                 // only collapse after enduring the gust for a long time.
                 if (elapsedFactor >= entry.breakProgress - .08f)
@@ -588,7 +789,7 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                     entry.transform.rotation = Quaternion.RotateTowards(
                         entry.transform.rotation,
                         entry.rotation * Quaternion.Euler(0f, 0f, 78f),
-                        Time.deltaTime * 5f);
+                        simulationStep * 5f);
                     // Modular pieces finally tear loose one by one. Entire combined
                     // buildings remain bent instead of becoming giant projectiles.
                     if (elapsedFactor >= entry.breakProgress)
@@ -602,12 +803,27 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                 continue;
             }
             if (entry.body == null) continue;
+            // Once an object has visibly broken free, stop waking and forcing it.
+            // Gravity and its existing velocity continue naturally, then Unity can
+            // put it to sleep instead of simulating every ruin for the full event.
+            if (Time.time >= entry.dynamicUntil)
+                continue;
             entry.body.isKinematic = false;
             entry.body.useGravity = true;
             entry.body.constraints = RigidbodyConstraints.None;
             entry.body.WakeUp();
+            bool tree = entry.terrainTree || ContainsAny(entry.lowerName,
+                "tree", "arbol", "pine", "spruce", "fir", "pino");
+            bool wooden = IsWoodFramePiece(entry.lowerName);
+            bool small = entry.size <= 3.2f;
             float difficulty = Mathf.Max(1f, Mathf.Sqrt(entry.body.mass));
-            float push = entry.heavyStructure ? 70f : 210f;
+            float push = entry.heavyStructure
+                ? 70f
+                : tree
+                    ? 390f
+                    : wooden || small
+                        ? 330f
+                        : 210f;
             entry.body.AddForce(direction * (push * strength / difficulty),
                 ForceMode.Acceleration);
             entry.body.AddTorque(Random.insideUnitSphere *
@@ -616,8 +832,6 @@ public sealed class ExtremeWindEventController : MonoBehaviour
             // Gravity remains dominant even while the horizontal gust is pushing.
             entry.body.AddForce(Vector3.down * 4f, ForceMode.Acceleration);
 
-            bool tree = entry.terrainTree || ContainsAny(entry.lowerName,
-                "tree", "arbol", "pine", "spruce", "fir", "pino");
             float maxSpeed = entry.heavyStructure ? 9f : tree ? 18f : 28f;
             entry.body.linearVelocity = Vector3.ClampMagnitude(
                 entry.body.linearVelocity, maxSpeed);
@@ -632,10 +846,6 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                 falling.y = Mathf.Min(falling.y, -4f);
                 entry.body.linearVelocity = falling;
             }
-            if (!Physics.Raycast(entry.transform.position, Vector3.down,
-                    1.5f, ~0, QueryTriggerInteraction.Ignore))
-                entry.body.AddForce(Vector3.down * 8f,
-                    ForceMode.Acceleration);
         }
     }
 
@@ -645,11 +855,29 @@ public sealed class ExtremeWindEventController : MonoBehaviour
         entry.activated = true;
         if (entry.structural) return;
         MakeDynamic(entry, false);
+        bool tree = entry.terrainTree || ContainsAny(entry.lowerName,
+            "tree", "arbol", "pine", "spruce", "fir", "pino");
+        if (tree && entry.body != null)
+        {
+            Vector3 direction = WindManager.Instance != null
+                ? WindManager.Instance.WindDirection
+                : transform.forward;
+            entry.body.AddForce(direction * 8f + Vector3.up * 2.8f,
+                ForceMode.VelocityChange);
+            entry.body.AddTorque(Random.onUnitSphere * 2.4f,
+                ForceMode.VelocityChange);
+        }
     }
 
     void MakeDynamic(PropSnapshot entry, bool structuralPiece)
     {
-        if (entry.body != null && !entry.body.isKinematic) return;
+        if (entry.body != null && !entry.body.isKinematic)
+        {
+            if (entry.dynamicUntil <= Time.time)
+                entry.dynamicUntil = Time.time + Random.Range(
+                    DynamicForceLifetimeMin, DynamicForceLifetimeMax);
+            return;
+        }
         entry.colliderAdapter =
             entry.transform.GetComponent<WindDynamicColliderAdapter>() ??
             entry.transform.gameObject.AddComponent<WindDynamicColliderAdapter>();
@@ -712,9 +940,13 @@ public sealed class ExtremeWindEventController : MonoBehaviour
                 structuralPiece ? 1.4f : .65f), 2f, 900f);
         entry.body.linearDamping = .12f;
         entry.body.angularDamping = .25f;
-        entry.body.interpolation = RigidbodyInterpolation.Interpolate;
-        entry.body.collisionDetectionMode =
-            CollisionDetectionMode.ContinuousDynamic;
+        entry.body.sleepThreshold = .12f;
+        entry.body.interpolation = RigidbodyInterpolation.None;
+        // ContinuousDynamic on hundreds of pieces is extremely expensive.
+        // Speeds are already clamped, so discrete collision is stable enough here.
+        entry.body.collisionDetectionMode = CollisionDetectionMode.Discrete;
+        entry.dynamicUntil = Time.time + Random.Range(
+            DynamicForceLifetimeMin, DynamicForceLifetimeMax);
 
     }
 
@@ -901,9 +1133,9 @@ public sealed class ExtremeWindEventController : MonoBehaviour
             Rigidbody body = log.AddComponent<Rigidbody>();
             body.mass = Random.Range(1.5f, 4f);
             body.useGravity = true;
-            body.interpolation = RigidbodyInterpolation.Interpolate;
-            body.collisionDetectionMode =
-                CollisionDetectionMode.ContinuousDynamic;
+            body.interpolation = RigidbodyInterpolation.None;
+            body.collisionDetectionMode = CollisionDetectionMode.Discrete;
+            body.sleepThreshold = .12f;
             body.AddForce((windDirection * Random.Range(8f, 15f) +
                            Vector3.up * Random.Range(1f, 4f)),
                 ForceMode.VelocityChange);
@@ -1103,13 +1335,13 @@ public sealed class ExtremeWindEventController : MonoBehaviour
         main.loop = true;
         main.duration = 8f;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.startLifetime = new ParticleSystem.MinMaxCurve(3.5f, 8f);
+        main.startLifetime = new ParticleSystem.MinMaxCurve(2.4f, 5f);
         main.startSize = new ParticleSystem.MinMaxCurve(.025f, .115f);
         main.startRotation = new ParticleSystem.MinMaxCurve(0f, Mathf.PI * 2f);
-        main.maxParticles = 3600;
+        main.maxParticles = 900;
 
         ParticleSystem.EmissionModule emission = flyingLeaves.emission;
-        emission.rateOverTime = 260f;
+        emission.rateOverTime = 145f;
         emission.enabled = false;
 
         ParticleSystem.ShapeModule shape = flyingLeaves.shape;
@@ -1128,15 +1360,11 @@ public sealed class ExtremeWindEventController : MonoBehaviour
         rotation.enabled = true;
         rotation.z = new ParticleSystem.MinMaxCurve(-7f, 7f);
 
+        // Thousands of per-particle 3D collision tests were one of the largest
+        // CPU spikes. Leaves remain world-space and visually cross the gust, but
+        // no longer run a physics query against the whole village every frame.
         ParticleSystem.CollisionModule collision = flyingLeaves.collision;
-        collision.enabled = true;
-        collision.type = ParticleSystemCollisionType.World;
-        collision.mode = ParticleSystemCollisionMode.Collision3D;
-        collision.dampen = .92f;
-        collision.bounce = 0f;
-        collision.lifetimeLoss = 0f;
-        collision.collidesWith = ~0;
-        collision.maxCollisionShapes = 256;
+        collision.enabled = false;
 
         ParticleSystemRenderer renderer =
             leaves.GetComponent<ParticleSystemRenderer>();

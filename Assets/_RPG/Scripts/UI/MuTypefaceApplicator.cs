@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -16,23 +17,57 @@ public sealed class MuTypefaceApplicator : MonoBehaviour
     {
         if (instance != null) return;
         GameObject root = new GameObject("MU_Typeface");
-        instance = root.AddComponent<MuTypefaceApplicator>();
+        MuTypefaceApplicator applicator =
+            root.AddComponent<MuTypefaceApplicator>();
+        // Awake runs inside AddComponent, so normally it has already claimed
+        // the singleton. Keep this assignment as a safe fallback.
+        if (instance == null)
+            instance = applicator;
         DontDestroyOnLoad(root);
     }
 
     void Awake()
     {
+        if (instance != null && instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        instance = this;
+
         Font source = Resources.Load<Font>("Fonts/Cinzel");
         if (source != null)
         {
             muFont = TMP_FontAsset.CreateFontAsset(source);
-            muFont.name = "MU_Cinzel_Runtime";
+            if (muFont != null)
+            {
+                muFont.name = "MU_Cinzel_Runtime";
+                muFont.atlasPopulationMode = AtlasPopulationMode.Dynamic;
+
+                TMP_FontAsset fallback = TMP_Settings.defaultFontAsset;
+                List<TMP_FontAsset> fallbackTable =
+                    muFont.fallbackFontAssetTable;
+                if (fallbackTable == null)
+                {
+                    fallbackTable = new List<TMP_FontAsset>();
+                    muFont.fallbackFontAssetTable = fallbackTable;
+                }
+
+                if (fallback != null && fallback != muFont &&
+                    !fallbackTable.Contains(fallback))
+                    fallbackTable.Add(fallback);
+            }
         }
         SceneManager.sceneLoaded += OnSceneLoaded;
         Apply();
     }
 
-    void OnDestroy() => SceneManager.sceneLoaded -= OnSceneLoaded;
+    void OnDestroy()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+        if (instance == this)
+            instance = null;
+    }
     void OnSceneLoaded(Scene scene, LoadSceneMode mode) => Apply();
 
     void Update()

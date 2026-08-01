@@ -17,6 +17,8 @@ public sealed class EnemySeparationController : MonoBehaviour
     NavMeshAgent agent;
     EnemyStats stats;
     float radius;
+    float nextSeparationCheck;
+    float lastSeparationCheck;
 
     void Awake()
     {
@@ -24,6 +26,8 @@ public sealed class EnemySeparationController : MonoBehaviour
         agent = GetComponent<NavMeshAgent>();
         stats = GetComponent<EnemyStats>();
         radius = CalculateRadius();
+        lastSeparationCheck = Time.time;
+        nextSeparationCheck = Time.time + Random.Range(.02f, .12f);
     }
 
     float CalculateRadius()
@@ -42,6 +46,10 @@ public sealed class EnemySeparationController : MonoBehaviour
     void LateUpdate()
     {
         if (stats == null || stats.IsDead) return;
+        if (Time.time < nextSeparationCheck) return;
+        float stepSeconds = Mathf.Clamp(Time.time - lastSeparationCheck, .05f, .2f);
+        lastSeparationCheck = Time.time;
+        nextSeparationCheck = Time.time + Random.Range(.08f, .13f);
         int count = Physics.OverlapSphereNonAlloc(transform.position,
             radius * 2.15f, nearby, ~0, QueryTriggerInteraction.Ignore);
         Vector3 correction = Vector3.zero;
@@ -68,7 +76,7 @@ public sealed class EnemySeparationController : MonoBehaviour
 
         Vector3 movement = correction.normalized *
             Mathf.Min(maximumCorrectionPerFrame,
-                separationSpeed * Time.deltaTime * correction.magnitude / contributors);
+                separationSpeed * stepSeconds * correction.magnitude / contributors);
         if (controller != null && controller.enabled)
             controller.Move(movement);
         else if (agent != null && agent.enabled && agent.isOnNavMesh)

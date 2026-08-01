@@ -49,7 +49,7 @@ public sealed class NewGameKingGoblinPortrait : MonoBehaviour
         };
         texture.Create();
         image.texture = texture;
-        image.color = new Color(1f, .82f, .72f, .76f);
+        image.color = new Color(1f, .86f, .78f, .9f);
 
         Shader softShader = Shader.Find("UI/SoftEdgeKingGoblinPortrait");
         if (softShader != null)
@@ -87,8 +87,15 @@ public sealed class NewGameKingGoblinPortrait : MonoBehaviour
 
         PreviewRenderIsolation.SetLayerRecursive(model);
         Bounds bounds = CalculateBounds(model);
-        Vector3 faceTarget = bounds.max - Vector3.up * bounds.size.y * .14f;
-        float faceSize = Mathf.Clamp(bounds.size.y * .14f, .48f, 1.05f);
+        Vector3 faceTarget = bounds.center + Vector3.up * bounds.extents.y * .7f;
+        float faceSize = Mathf.Clamp(bounds.size.y * .16f, .52f, 1.18f);
+        if (TryCalculateNamedHeadBounds(model, out Bounds headBounds))
+        {
+            faceTarget = headBounds.center;
+            faceSize = Mathf.Clamp(
+                Mathf.Max(headBounds.extents.x, headBounds.extents.y) * 1.18f,
+                .46f, 1.18f);
+        }
         Animator portraitAnimator = model.GetComponentInChildren<Animator>(true);
         if (portraitAnimator != null && portraitAnimator.isHuman)
         {
@@ -98,9 +105,14 @@ public sealed class NewGameKingGoblinPortrait : MonoBehaviour
             {
                 Vector3 headAxis = neck != null ? head.position - neck.position : Vector3.up;
                 float headUnit = Mathf.Max(.08f, headAxis.magnitude);
-                faceTarget = head.position + headAxis.normalized * headUnit * .42f;
+                // Aim at the head bone itself. The old +42% offset aimed above the skull and
+                // consequently pushed the visible face toward the lower edge of the image.
+                // Lowering the camera's aim places the face higher inside the RawImage. This
+                // reveals the complete face instead of leaving only the crown at the lower edge.
+                faceTarget = head.position - headAxis.normalized * headUnit * .28f;
                 faceSize = Mathf.Clamp(
-                    Mathf.Max(headUnit * 2.65f, bounds.size.y * .105f), .46f, 1.02f);
+                    Mathf.Max(headUnit * 2.55f, bounds.size.y * .125f),
+                    .52f, 1.18f);
             }
         }
 
@@ -156,6 +168,31 @@ public sealed class NewGameKingGoblinPortrait : MonoBehaviour
         for (int i = 1; i < renderers.Count; i++)
             bounds.Encapsulate(renderers[i].bounds);
         return bounds;
+    }
+
+    static bool TryCalculateNamedHeadBounds(GameObject root, out Bounds bounds)
+    {
+        bool found = false;
+        bounds = default;
+        foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+        {
+            if (!renderer.enabled || renderer is ParticleSystemRenderer ||
+                renderer is TrailRenderer || renderer is LineRenderer)
+                continue;
+            string name = renderer.transform.name.ToLowerInvariant();
+            if (!name.Contains("head") && !name.Contains("face") &&
+                !name.Contains("hair") && !name.Contains("helmet") &&
+                !name.Contains("eye"))
+                continue;
+            if (!found)
+            {
+                bounds = renderer.bounds;
+                found = true;
+            }
+            else
+                bounds.Encapsulate(renderer.bounds);
+        }
+        return found;
     }
 
     static bool IsInterfaceRenderer(Transform candidate)

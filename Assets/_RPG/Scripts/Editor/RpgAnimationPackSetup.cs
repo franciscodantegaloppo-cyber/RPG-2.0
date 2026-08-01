@@ -12,6 +12,14 @@ public static class RpgAnimationPackSetup
         CatalogFolder + "/RpgAnimationPackCatalog.asset";
     const string AnimFolder = "Assets/DoubleL/Demo/Anim";
     const string UnityFbxFolder = "Assets/DoubleL/FBX Unity";
+    const string RelaxedIdleFolder =
+        "Assets/Kevin Iglesias/Human Animations/Animations/Male/Idles";
+    const string RelaxedMovementFolder =
+        "Assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animations/Unarmed";
+    const string TwoHandSwordFolder =
+        "Assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animations/2Hand-Sword";
+    const string RelaxedNaturalMovementFolder =
+        "Assets/Kevin Iglesias/Human Animations/Animations/Male/Movement/Run";
     const string ShieldPath = "Assets/DoubleL/Model/SM_Wep_Shield_01.fbx";
 
     static RpgAnimationPackSetup()
@@ -37,6 +45,10 @@ public static class RpgAnimationPackSetup
             new Dictionary<string, AnimationClip>();
         AddClips(AnimFolder, clips);
         AddClips(UnityFbxFolder, clips);
+        AddClips(RelaxedIdleFolder, clips);
+        AddClips(RelaxedMovementFolder, clips);
+        AddClips(TwoHandSwordFolder, clips);
+        AddClips(RelaxedNaturalMovementFolder, clips);
         catalog.clips = clips.Values
             .OrderBy(clip => clip.name)
             .ToArray();

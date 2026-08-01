@@ -27,7 +27,7 @@ public static class KingGoblinPlagueStatueSetup
         if (statue == null)
         {
             GameObject model = AssetDatabase.LoadAssetAtPath<GameObject>(ModelPath);
-            if (model == null) { Debug.LogError("[PlagueStatue] No se encontrÃ³ el modelo del King Goblin."); return; }
+            if (model == null) { Debug.LogError("[PlagueStatue] No se encontr\u00f3 el modelo del King Goblin."); return; }
             statue = PrefabUtility.InstantiatePrefab(model) as GameObject;
             if (statue == null) statue = Object.Instantiate(model);
             statue.name = "KingGoblinPlagueStatue";

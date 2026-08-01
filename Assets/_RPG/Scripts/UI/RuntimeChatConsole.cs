@@ -154,6 +154,18 @@ public class RuntimeChatConsole : MonoBehaviour
         {
             ToggleExtremeGust();
         }
+        else if (message.Equals("/lunadesangre", System.StringComparison.OrdinalIgnoreCase))
+        {
+            ToggleBloodMoon();
+        }
+        else if (message.Equals("/dia", System.StringComparison.OrdinalIgnoreCase))
+        {
+            SetGodTime(false);
+        }
+        else if (message.Equals("/noche", System.StringComparison.OrdinalIgnoreCase))
+        {
+            SetGodTime(true);
+        }
         else if (message.StartsWith("/givexpe", System.StringComparison.OrdinalIgnoreCase))
         {
             HandleGiveXpCommand(message);
@@ -289,6 +301,63 @@ public class RuntimeChatConsole : MonoBehaviour
         AppendLine("Sistema", enabled
             ? "Rafaga extrema activada. Comienza la alerta de 10 segundos."
             : "Rafaga extrema desactivada. El viento vuelve a la normalidad.");
+    }
+
+    void ToggleBloodMoon()
+    {
+        PlayerStats stats = ResolvePlayerStats();
+        if (stats == null || !stats.GodModeEnabled)
+        {
+            AppendLine("Sistema",
+                "/lunadesangre solo funciona en modo dios. Escribi /dios primero.");
+            return;
+        }
+
+        BloodMoonEventManager controller =
+            BloodMoonEventManager.Instance ??
+            FindAnyObjectByType<BloodMoonEventManager>(
+                FindObjectsInactive.Include);
+        if (controller == null)
+        {
+            AppendLine("Sistema",
+                "No se encontro el controlador de Luna de Sangre.");
+            return;
+        }
+
+        bool enabled = controller.ToggleManualOverride();
+        AppendLine("Sistema", enabled
+            ? "Luna de Sangre activada manualmente."
+            : BloodMoonEventManager.IsActive
+                ? "Activacion manual deshabilitada; continua por corresponder al septimo dia."
+                : "Luna de Sangre desactivada.");
+    }
+
+    void SetGodTime(bool night)
+    {
+        PlayerStats stats = ResolvePlayerStats();
+        if (stats == null || !stats.GodModeEnabled)
+        {
+            AppendLine("Sistema",
+                (night ? "/noche" : "/dia") +
+                " solo funciona en modo dios. Escribi /dios primero.");
+            return;
+        }
+
+        TenkokuDayNightCycle cycle =
+            FindAnyObjectByType<TenkokuDayNightCycle>(
+                FindObjectsInactive.Include);
+        if (cycle == null)
+        {
+            AppendLine("Sistema",
+                "No se encontro el ciclo de dia y noche en esta escena.");
+            return;
+        }
+
+        float targetHour = night ? 22f : 10f;
+        cycle.SetGodModeHour(targetHour);
+        AppendLine("Sistema", night
+            ? "Noche establecida: 10:00 PM."
+            : "Dia establecido: 10:00 AM.");
     }
 
     void HandleGiveCommand(string message)
@@ -492,7 +561,7 @@ public class RuntimeChatConsole : MonoBehaviour
         var placeholderRect = CreateRect(inputRoot, "Placeholder", new Vector2(0.03f, 0f), new Vector2(0.98f, 1f));
         placeholderText = placeholderRect.gameObject.AddComponent<TextMeshProUGUI>();
         placeholderText.text =
-            "Comando: /dios, /rafaga, /notbreak, /mision N, /givexpe";
+            "Comando: /dios, /dia, /noche, /rafaga, /lunadesangre, /mision N";
         placeholderText.fontSize = 17;
         placeholderText.enableAutoSizing = true;
         placeholderText.fontSizeMin = 9f;

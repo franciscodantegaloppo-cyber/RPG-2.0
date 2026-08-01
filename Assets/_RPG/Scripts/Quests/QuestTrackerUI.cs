@@ -135,7 +135,7 @@ public class QuestTrackerUI : MonoBehaviour
                 text.Append("Principal: usa el Diamante Rojo desde el inventario");
                 break;
             case PrimaryQuestState.SeventhFindTonio:
-                text.Append("Principal: busca a Tonio");
+                text.Append("Principal: ve a hablar con Tonio");
                 break;
             case PrimaryQuestState.SeventhFollowBloodTrail:
                 text.Append("Principal: sigue el rastro de sangre");
@@ -146,8 +146,11 @@ public class QuestTrackerUI : MonoBehaviour
             case PrimaryQuestState.SeventhWindAftermath:
                 text.Append("Principal: sobrevive a la r\u00e1faga");
                 break;
+            case PrimaryQuestState.SeventhHuntDemonAnomaly:
+                text.Append("Principal: atraviesa el sendero y derrota al Demonio An\u00f3malo");
+                break;
             case PrimaryQuestState.SeventhQuestCompleted:
-                text.Append("Principal: despierta junto al Viejo");
+                text.Append("Principal: busca otro camino; Boat Stain est\u00e1 en construcci\u00f3n");
                 break;
         }
         if (q.SkeletonState == QuestTaskState.Active || q.SkeletonState == QuestTaskState.ReadyToTurnIn)

@@ -22,6 +22,7 @@ public class EnemyStats : MonoBehaviour
     EnemyAI ai;
     KingGoblinBossAI kingBoss;
     CrabDemonBossAI crabBoss;
+    OrcWarriorAI orcWarrior;
     AnimalAI animalAi;
 
     public float Attack => attack;
@@ -85,6 +86,7 @@ public class EnemyStats : MonoBehaviour
         ai = GetComponent<EnemyAI>();
         kingBoss = GetComponent<KingGoblinBossAI>();
         crabBoss = GetComponent<CrabDemonBossAI>();
+        orcWarrior = GetComponent<OrcWarriorAI>();
         animalAi = GetComponent<AnimalAI>();
         if (GetComponent<EnemySeparationController>() == null)
             gameObject.AddComponent<EnemySeparationController>();
@@ -113,6 +115,9 @@ public class EnemyStats : MonoBehaviour
         // TryBlock() also fires its own Block animation/reaction, so nothing else needs to run.
         if (crabBoss != null && crabBoss.TryBlock(attackerPos, amount))
             return;
+        if (orcWarrior != null &&
+            orcWarrior.TryBlock(attackerPos, amount))
+            return;
 
         currentHealth -= amount;
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
@@ -124,6 +129,7 @@ public class EnemyStats : MonoBehaviour
             ai?.OnHurt(attackerPos);
             kingBoss?.OnHurt();
             crabBoss?.OnHurt(amount);
+            orcWarrior?.OnHurt(attackerPos, amount);
             animalAi?.OnHurt(attackerPos);
         }
     }
@@ -145,6 +151,7 @@ public class EnemyStats : MonoBehaviour
         OnDeath?.Invoke();
         OnAnyDeath?.Invoke(this);
         ai?.OnDeath();
+        orcWarrior?.OnDeath();
     }
 
     void DropGold()

@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.SceneManagement;
 
 // One complete world cycle lasts 50 real minutes: 30 minutes of daylight and 20 of night.
 // Tenkoku versions use slightly different public member names, so the bridge discovers its
@@ -30,6 +31,8 @@ public class TenkokuDayNightCycle : MonoBehaviour
     public bool IsEquinox => worldDay % 180 == 0;
     public float SeasonalDeclination => 23.44f * Mathf.Sin(worldDay / 360f * Mathf.PI * 2f);
     public bool NightOverrideActive => nightOverrideCount > 0;
+    public bool GodModeTimeControlEnabled =>
+        playerStats != null && playerStats.GodModeEnabled;
 
     void Awake()
     {
@@ -49,13 +52,11 @@ public class TenkokuDayNightCycle : MonoBehaviour
             nextPlayerLookup = Time.unscaledTime + 1f;
             playerStats = FindAnyObjectByType<PlayerStats>();
         }
+        bool godFastForwarded = HandleGodModeFastForward();
         if (NightOverrideActive)
             elapsed = HourToElapsed(nightOverrideHour);
-        else
-        {
+        else if (!godFastForwarded)
             elapsed += Time.deltaTime;
-            HandleGodModeFastForward();
-        }
         if (elapsed >= TotalDuration)
         {
             elapsed -= TotalDuration;
@@ -67,18 +68,16 @@ public class TenkokuDayNightCycle : MonoBehaviour
         urpSky?.Apply(CurrentHour, worldDay, IsEquinox);
     }
 
-    void HandleGodModeFastForward()
+    bool HandleGodModeFastForward()
     {
         Keyboard keyboard = Keyboard.current;
-        bool gameplay = GameManager.Instance == null ||
-                        GameManager.Instance.IsGameplayActive();
         bool allowed = playerStats != null && playerStats.GodModeEnabled &&
-                       keyboard != null && gameplay &&
+                       keyboard != null &&
                        !RuntimeChatConsole.IsTyping;
         if (!allowed || !keyboard.tKey.isPressed)
         {
             nextFastForwardStep = 0f;
-            return;
+            return false;
         }
 
         // One press advances exactly 30 game minutes. Holding T repeats that step once per
@@ -87,13 +86,17 @@ public class TenkokuDayNightCycle : MonoBehaviour
         bool repeatedStep = !firstStep &&
                             Time.unscaledTime >= nextFastForwardStep;
         if (!firstStep && !repeatedStep)
-            return;
+            return false;
 
+        // God-mode time controls deliberately release quest/boss night locks so the
+        // requested time remains visible instead of being overwritten next frame.
+        nightOverrideCount = 0;
         AdvanceGameMinutes(30f);
         nextFastForwardStep = Time.unscaledTime + 1f;
+        return true;
     }
 
-    void AdvanceGameMinutes(float minutes)
+    public void AdvanceGameMinutes(float minutes)
     {
         float targetHour = CurrentHour + minutes / 60f;
         while (targetHour >= 24f) { targetHour -= 24f; worldDay++; }
@@ -107,6 +110,13 @@ public class TenkokuDayNightCycle : MonoBehaviour
         ApplyTenkoku(currentHour);
         ApplyFallbackLighting(currentHour);
         urpSky?.Apply(currentHour, worldDay, IsEquinox);
+    }
+
+    public void SetGodModeHour(float hour)
+    {
+        nightOverrideCount = 0;
+        nextFastForwardStep = 0f;
+        SetCurrentHour(hour);
     }
 
     public void BeginNightOverride(float hour = 0f)
@@ -150,6 +160,13 @@ public class TenkokuDayNightCycle : MonoBehaviour
             timeProperty = FindMember<PropertyInfo>(type, "currentTime", "timeOfDay", "time", "currentTimeOfDay");
             if (timeField == null && timeProperty == null) continue;
             tenkoku = component;
+            // Tenkoku's legacy renderer edits RenderSettings.skybox (including its exposure)
+            // every frame and is not compatible with URP. Keep its astronomical/time data
+            // available to this bridge, but let the URP Fantasy presentation be the sole owner
+            // of the visible sky.
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null &&
+                component.enabled)
+                component.enabled = false;
             SetBoolMember(type, component, false, "autoTime", "useAutoTime", "enableAutoTime");
             Debug.Log("[DayNight] Conectado a " + type.Name + ". Día: 30 min; noche: 20 min.");
             return;
@@ -393,10 +410,39 @@ public class URPDynamicSkyWeather : MonoBehaviour
 
 public static class TenkokuDayNightCycleBootstrap
 {
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+    static void Install()
+    {
+        SceneManager.sceneLoaded -= HandleSceneLoaded;
+        SceneManager.sceneLoaded += HandleSceneLoaded;
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     static void CreateCycle()
     {
-        if (UnityEngine.Object.FindAnyObjectByType<TenkokuDayNightCycle>() != null) return;
-        new GameObject("TenkokuDayNightCycle").AddComponent<TenkokuDayNightCycle>();
+        EnsureForScene(SceneManager.GetActiveScene());
+    }
+
+    static void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        EnsureForScene(scene);
+    }
+
+    public static TenkokuDayNightCycle EnsureForScene(Scene scene)
+    {
+        TenkokuDayNightCycle existing =
+            UnityEngine.Object.FindAnyObjectByType<TenkokuDayNightCycle>();
+        if (existing != null)
+            return existing;
+
+        // The character-creation scene does not drive world lighting.
+        if (!scene.IsValid() || scene.name == "NewGame")
+            return null;
+
+        GameObject root = new GameObject("RuntimeDayNightCycle");
+        TenkokuDayNightCycle cycle = root.AddComponent<TenkokuDayNightCycle>();
+        UnityEngine.Object.DontDestroyOnLoad(root);
+        Debug.Log("[DayNight] Ciclo persistente restaurado para " + scene.name + ".");
+        return cycle;
     }
 }

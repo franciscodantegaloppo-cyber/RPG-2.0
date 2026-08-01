@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 
 public class WeaponSocket : MonoBehaviour
@@ -33,6 +34,10 @@ public class WeaponSocket : MonoBehaviour
     MeasuredSwordSlashTrail measuredSlashTrail;
     Transform offHandGripPoint;
     bool animationDrivenGrip;
+    bool carriedOnBack;
+    bool runtimeBackSocket;
+    bool weaponTransitioning;
+    Coroutine carryTransition;
     Color currentSlashColor = new Color(.82f, .88f, 1f);
 
     // The weapon prefab's mesh root can carry its own baked-in rotation (it did for
@@ -310,6 +315,15 @@ public class WeaponSocket : MonoBehaviour
     {
         if (equippedWeapon == null || !equippedWeapon.activeInHierarchy)
             return;
+
+        if (weaponTransitioning)
+            return;
+
+        if (carriedOnBack)
+        {
+            UpdateRuntimeBackSocketPose();
+            return;
+        }
 
         UpdateBladeTipVelocity();
         measuredSlashTrail?.Sample(CurrentBladeTipWorldPosition,
@@ -792,6 +806,7 @@ public class WeaponSocket : MonoBehaviour
         hasFallbackBladeBounds = false;
         offHandGripPoint = null;
         animationDrivenGrip = false;
+        carriedOnBack = false;
         ResetBladeHistory();
         if (gripIK != null)
         {
@@ -802,17 +817,23 @@ public class WeaponSocket : MonoBehaviour
 
     public void HideWeapon()
     {
-        if (equippedWeapon != null)
+        if (equippedWeapon == null)
+            return;
+
+        CancelCarryTransition();
+        EnsureBackSocket();
+        if (backSocket == null)
         {
             equippedWeapon.SetActive(false);
-            if (backSocket != null)
-            {
-                equippedWeapon.transform.SetParent(backSocket);
-                equippedWeapon.transform.localPosition = Vector3.zero;
-                equippedWeapon.transform.localRotation = Quaternion.identity;
-                equippedWeapon.SetActive(true);
-            }
+            return;
         }
+
+        carriedOnBack = true;
+        UpdateRuntimeBackSocketPose();
+        equippedWeapon.transform.SetParent(backSocket, false);
+        equippedWeapon.transform.localPosition = Vector3.zero;
+        equippedWeapon.transform.localRotation = Quaternion.identity;
+        equippedWeapon.SetActive(true);
 
         if (gripIK != null)
         {
@@ -825,9 +846,11 @@ public class WeaponSocket : MonoBehaviour
     {
         if (equippedWeapon == null) return;
 
+        CancelCarryTransition();
         CacheHand();
         Transform attachPoint = handTransform != null ? handTransform : transform;
-        equippedWeapon.transform.SetParent(attachPoint);
+        carriedOnBack = false;
+        equippedWeapon.transform.SetParent(attachPoint, false);
         ApplyFixedGrip(equippedWeapon.transform, true);
         equippedWeapon.SetActive(true);
     }
@@ -851,9 +874,209 @@ public class WeaponSocket : MonoBehaviour
 
     public void ToggleWeaponVisibility()
     {
-        if (equippedWeapon == null) return;
-        if (equippedWeapon.activeSelf) HideWeapon();
-        else ShowWeapon();
+        // Imported draw/sheath clips can contain WeaponSwitch events. During the continuous
+        // transfer below those events must not snap the sword to the opposite socket.
+        if (equippedWeapon == null || weaponTransitioning) return;
+        if (carriedOnBack || !equippedWeapon.activeSelf) ShowWeapon();
+        else HideWeapon();
+    }
+
+    public bool IsCarriedOnBack => carriedOnBack;
+    public bool IsCarryTransitioning => weaponTransitioning;
+
+    public void AnimateWeaponToHand(float duration = .42f)
+    {
+        StartCarryTransition(true, duration);
+    }
+
+    public void AnimateWeaponToBack(float duration = .46f)
+    {
+        StartCarryTransition(false, duration);
+    }
+
+    public void CancelCarryTransition()
+    {
+        if (carryTransition != null)
+            StopCoroutine(carryTransition);
+        carryTransition = null;
+        weaponTransitioning = false;
+    }
+
+    void StartCarryTransition(bool toHand, float duration)
+    {
+        if (equippedWeapon == null)
+            return;
+        CancelCarryTransition();
+        carryTransition = StartCoroutine(
+            CarryTransitionRoutine(toHand, Mathf.Max(.08f, duration)));
+    }
+
+    IEnumerator CarryTransitionRoutine(bool toHand, float duration)
+    {
+        EnsureBackSocket();
+        CacheHand();
+        if (backSocket == null || handTransform == null)
+        {
+            if (toHand) ShowWeapon();
+            else HideWeapon();
+            yield break;
+        }
+
+        weaponTransitioning = true;
+        animationDrivenGrip = false;
+        equippedWeapon.SetActive(true);
+
+        if (gripIK != null)
+        {
+            gripIK.target = null;
+            gripIK.weight = 0f;
+        }
+
+        float elapsed = 0f;
+        bool changedParent = false;
+        Vector3 transitionLocalPosition = Vector3.zero;
+        Quaternion transitionLocalRotation = Quaternion.identity;
+        float handContact = toHand ? .58f : .78f;
+
+        if (toHand)
+        {
+            carriedOnBack = true;
+            UpdateRuntimeBackSocketPose();
+            equippedWeapon.transform.SetParent(backSocket, false);
+            equippedWeapon.transform.localPosition = Vector3.zero;
+            equippedWeapon.transform.localRotation = Quaternion.identity;
+        }
+        else
+        {
+            // During most of the sheath animation the sword remains rigidly attached to the
+            // animated hand. The hand therefore carries it toward the back instead of the sword
+            // travelling independently as if pulled by a magnet.
+            carriedOnBack = false;
+            equippedWeapon.transform.SetParent(handTransform, false);
+            ApplyFixedGrip(equippedWeapon.transform, true);
+        }
+
+        while (elapsed < duration && equippedWeapon != null)
+        {
+            elapsed += Time.deltaTime;
+            float linear = Mathf.Clamp01(elapsed / duration);
+            UpdateRuntimeBackSocketPose();
+            if (toHand)
+            {
+                // Leave the sword fixed on the back while the empty hand reaches for the grip.
+                // Once contact is made, parent it to that hand and let the remaining animation
+                // pull both hand and blade forward together.
+                if (linear < handContact)
+                {
+                    equippedWeapon.transform.localPosition = Vector3.zero;
+                    equippedWeapon.transform.localRotation = Quaternion.identity;
+                    yield return null;
+                    continue;
+                }
+                if (!changedParent)
+                {
+                    equippedWeapon.transform.SetParent(handTransform, true);
+                    transitionLocalPosition =
+                        equippedWeapon.transform.localPosition;
+                    transitionLocalRotation =
+                        equippedWeapon.transform.localRotation;
+                    changedParent = true;
+                }
+                float phase = Mathf.InverseLerp(handContact, 1f, linear);
+                float eased = phase * phase * (3f - 2f * phase);
+                equippedWeapon.transform.localPosition = Vector3.Lerp(
+                    transitionLocalPosition, CurrentHandPositionOffset, eased);
+                equippedWeapon.transform.localRotation = Quaternion.Slerp(
+                    transitionLocalRotation,
+                    Quaternion.Euler(CurrentHandRotationOffset), eased);
+            }
+            else
+            {
+                // The hand owns the sword until it reaches the shoulder. Only the last short
+                // portion settles the grip precisely into the back socket.
+                if (linear < handContact)
+                {
+                    yield return null;
+                    continue;
+                }
+                if (!changedParent)
+                {
+                    equippedWeapon.transform.SetParent(backSocket, true);
+                    transitionLocalPosition =
+                        equippedWeapon.transform.localPosition;
+                    transitionLocalRotation =
+                        equippedWeapon.transform.localRotation;
+                    changedParent = true;
+                }
+                float phase = Mathf.InverseLerp(handContact, 1f, linear);
+                float eased = phase * phase * (3f - 2f * phase);
+                equippedWeapon.transform.localPosition = Vector3.Lerp(
+                    transitionLocalPosition, Vector3.zero, eased);
+                equippedWeapon.transform.localRotation = Quaternion.Slerp(
+                    transitionLocalRotation, Quaternion.identity, eased);
+            }
+            yield return null;
+        }
+
+        if (equippedWeapon != null)
+        {
+            if (toHand)
+            {
+                carriedOnBack = false;
+                equippedWeapon.transform.SetParent(handTransform, false);
+                ApplyFixedGrip(equippedWeapon.transform, true);
+            }
+            else
+            {
+                carriedOnBack = true;
+                UpdateRuntimeBackSocketPose();
+                equippedWeapon.transform.SetParent(backSocket, false);
+                equippedWeapon.transform.localPosition = Vector3.zero;
+                equippedWeapon.transform.localRotation = Quaternion.identity;
+            }
+        }
+        weaponTransitioning = false;
+        carryTransition = null;
+    }
+
+    void EnsureBackSocket()
+    {
+        if (backSocket != null)
+            return;
+
+        GameObject socketObject = new GameObject("WeaponBackSocket_Runtime");
+        backSocket = socketObject.transform;
+        backSocket.SetParent(transform, false);
+        runtimeBackSocket = true;
+        UpdateRuntimeBackSocketPose();
+    }
+
+    void UpdateRuntimeBackSocketPose()
+    {
+        if (!runtimeBackSocket || backSocket == null)
+            return;
+
+        CacheHand();
+        Transform chest = anim != null
+            ? anim.GetBoneTransform(HumanBodyBones.Chest) ??
+              anim.GetBoneTransform(HumanBodyBones.UpperChest)
+            : null;
+        Vector3 chestPosition = chest != null
+            ? chest.position
+            : transform.position + transform.up * 1.15f;
+
+        // The grip origin is close to the handle. Put it on the lower-left
+        // portion of the back and point the real cached blade axis toward the
+        // opposite shoulder. This works for differently authored sword meshes.
+        backSocket.position = chestPosition - transform.forward * .2f -
+                              transform.up * .36f - transform.right * .16f;
+        Vector3 desiredBladeDirection =
+            (transform.up + transform.right * .34f).normalized;
+        Vector3 localBladeAxis = bladeAxisInGripSpace.sqrMagnitude > .001f
+            ? bladeAxisInGripSpace.normalized
+            : Vector3.forward;
+        backSocket.rotation = Quaternion.FromToRotation(
+            localBladeAxis, desiredBladeDirection);
     }
 
     Vector3 CurrentHandPositionOffset =>

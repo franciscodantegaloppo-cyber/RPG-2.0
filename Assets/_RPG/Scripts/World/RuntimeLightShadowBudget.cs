@@ -20,7 +20,7 @@ public sealed class RuntimeLightShadowBudget : MonoBehaviour
     Transform viewer;
     float nextRefresh;
 
-    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
     static void Install()
     {
         if (FindAnyObjectByType<RuntimeLightShadowBudget>() != null) return;

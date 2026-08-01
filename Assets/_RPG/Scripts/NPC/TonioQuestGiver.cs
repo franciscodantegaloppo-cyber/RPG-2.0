@@ -5,14 +5,24 @@ public class TonioQuestGiver : MonoBehaviour, IInteractable
     [Header("Identidad")]
     [SerializeField] string npcName = "Tonio";
     NPCWander wander;
+    TonioHouseRoutine houseRoutine;
 
     void Awake()
     {
         wander = GetComponent<NPCWander>();
         if (wander == null) wander = gameObject.AddComponent<NPCWander>();
         ConfigureIndoorController();
-        wander.Configure(speed: .45f, radius: 1.25f, step: .65f, minWait: 3.5f, maxWait: 7f);
+        wander.Configure(speed: .45f, radius: .75f, step: .45f, minWait: 3.5f, maxWait: 7f);
+        wander.ConfigureReturnToSpawnChance(1f);
+        // The generated interior floor is a walkable trigger, not a solid physical floor.
+        // CharacterController gravity therefore sinks Tonio between ground corrections.
+        // Keep the proven ground-projected movement and disable random wandering: the dedicated
+        // house routine is now the only system allowed to move him.
         wander.UseTransformMovement(true);
+        wander.SetMoving(false);
+        houseRoutine = GetComponent<TonioHouseRoutine>();
+        if (houseRoutine == null)
+            houseRoutine = gameObject.AddComponent<TonioHouseRoutine>();
         EnsureInteractionTrigger();
         QuestNpcAttentionIcon icon = GetComponent<QuestNpcAttentionIcon>();
         if (icon == null) icon = gameObject.AddComponent<QuestNpcAttentionIcon>();
@@ -20,7 +30,8 @@ public class TonioQuestGiver : MonoBehaviour, IInteractable
     }
 
     public string GetInteractionText() => "[E] Hablar con " + npcName;
-    public bool CanInteract(PlayerInteraction player) => true;
+    public bool CanInteract(PlayerInteraction player) =>
+        houseRoutine == null || !houseRoutine.IsRouteActive;
 
     public void Interact(PlayerInteraction player)
     {
@@ -125,11 +136,11 @@ public class TonioQuestGiver : MonoBehaviour, IInteractable
     void ShowTonioAfterNahue(MerchantDialoguePanel panel, QuestManager quests)
     {
         panel.Show(npcName,
-            "Â¡Ahh! Â¡Conociste al gran Nahue! Hay quienes luchan contra monstruos, pero Ã©l lucha contra el eco de su propia mente.",
-            "Continuar el diÃ¡logo", () => panel.Show("Frank",
-                "Â¡Jaja! Tienes razÃ³n. Tal vez por eso inspira temor, porque demuestra que un hombre puede seguir de pie incluso cuando hace mucho tiempo dejÃ³ de creer que el mundo fuera capaz de responderle.",
+            "\u00a1Ahh! \u00a1Conociste al gran Nahue! Hay quienes luchan contra monstruos, pero \u00e9l lucha contra el eco de su propia mente.",
+            "Continuar el di\u00e1logo", () => panel.Show("Frank",
+                "\u00a1Jaja! Tienes raz\u00f3n. Tal vez por eso inspira temor, porque demuestra que un hombre puede seguir de pie incluso cuando hace mucho tiempo dej\u00f3 de creer que el mundo fuera capaz de responderle.",
                 "Siguiente", () => panel.Show(npcName,
-                    "Â¡AsÃ­ es! Como Ã©l hay muchos, y debo adjudicarlo a la peste que antes te mencionÃ©. Me gustarÃ­a que comenzaras a forjar tus armas. Ve a la mesa de crafteo y aprende a utilizarla.",
+                    "\u00a1As\u00ed es! Como \u00e9l hay muchos, y debo adjudicarlo a la peste que antes te mencion\u00e9. Me gustar\u00eda que comenzaras a forjar tus armas. Ve a la mesa de crafteo y aprende a utilizarla.",
                     "Ir a la mesa", () =>
                     {
                         quests.StartCraftingTraining();
@@ -139,11 +150,11 @@ public class TonioQuestGiver : MonoBehaviour, IInteractable
 
     void ShowPlagueInvestigationDialogue(MerchantDialoguePanel panel, QuestManager quests)
     {
-        panel.Show(npcName, "Â¿CÃ³mo te ha ido?", "Siguiente", () => panel.Show("Frank",
-            "Â¡Quiero que me hables sobre la peste!", "Siguiente", () => panel.Show(npcName,
+        panel.Show(npcName, "\u00bfC\u00f3mo te ha ido?", "Siguiente", () => panel.Show("Frank",
+            "\u00a1Quiero que me hables sobre la peste!", "Siguiente", () => panel.Show(npcName,
                 "Veo que te ha ido bien y has aumentado tu poder...", "Siguiente", () => panel.Show("Frank",
                     "Deja de dar vueltas...", "Siguiente", () => panel.Show(npcName,
-                        "Necesito que comiences experimentÃ¡ndolo en carne propia. DirÃ­gete hacia la estatua a las afueras del pueblo.",
+                        "Necesito que comiences experiment\u00e1ndolo en carne propia. Dir\u00edgete hacia la estatua a las afueras del pueblo.",
                         "Ir a la estatua", () =>
                         {
                             quests.SendPlayerToKingGoblinStatue();

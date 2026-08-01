@@ -115,7 +115,7 @@ public class QuestNpcAttentionIcon : MonoBehaviour
         marker.transform.localScale = baseScale;
 
         RectTransform rect = marker.GetComponent<RectTransform>();
-        rect.sizeDelta = new Vector2(82f, 108f);
+        rect.sizeDelta = new Vector2(124f, 156f);
         Canvas canvas = marker.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.WorldSpace;
         canvas.overrideSorting = true;
@@ -128,34 +128,37 @@ public class QuestNpcAttentionIcon : MonoBehaviour
         glowObject.transform.SetParent(marker.transform, false);
         glowText = glowObject.GetComponent<TextMeshProUGUI>();
         glowText.text = "!";
-        glowText.fontSize = 96f;
+        glowText.fontSize = 112f;
         glowText.fontStyle = FontStyles.Bold;
-        glowText.color = new Color(1f, .7f, .03f, .48f);
+        glowText.color = new Color(1f, .94f, .08f, .58f);
         glowText.alignment = TextAlignmentOptions.Center;
-        glowText.outlineColor = new Color(1f, .45f, 0f, .45f);
-        glowText.outlineWidth = .38f;
+        glowText.overflowMode = TextOverflowModes.Overflow;
+        glowText.outlineColor = new Color(1f, .72f, 0f, .5f);
+        glowText.outlineWidth = .28f;
         glowText.raycastTarget = false;
         RectTransform glowRect = glowText.rectTransform;
         glowRect.anchorMin = Vector2.zero;
         glowRect.anchorMax = Vector2.one;
-        glowRect.offsetMin = new Vector2(-10f, -10f);
-        glowRect.offsetMax = new Vector2(10f, 10f);
+        glowRect.offsetMin = new Vector2(8f, 8f);
+        glowRect.offsetMax = new Vector2(-8f, -8f);
 
         GameObject textObject = new GameObject("Exclamation", typeof(RectTransform), typeof(TextMeshProUGUI));
         textObject.transform.SetParent(marker.transform, false);
         TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
         text.text = "!";
-        text.fontSize = 82f;
+        text.fontSize = 104f;
         text.fontStyle = FontStyles.Bold;
-        text.color = new Color(1f, .78f, .05f, 1f);
+        text.color = new Color(1f, .93f, .06f, 1f);
         text.alignment = TextAlignmentOptions.Center;
+        text.overflowMode = TextOverflowModes.Overflow;
         text.outlineColor = new Color(.08f, .035f, 0f, 1f);
         text.outlineWidth = .22f;
         text.raycastTarget = false;
         RectTransform textRect = text.rectTransform;
         textRect.anchorMin = Vector2.zero;
         textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = textRect.offsetMax = Vector2.zero;
+        textRect.offsetMin = new Vector2(12f, 10f);
+        textRect.offsetMax = new Vector2(-12f, -10f);
         marker.SetActive(false);
     }
 

@@ -354,6 +354,16 @@ public class PlayerStats : MonoBehaviour
             animBridge?.TriggerGetHitDirectional(attackerWorldPos);
     }
 
+    // Story hazards may be absolute even while testing in god mode. Mission seven uses this
+    // for the burning water surrounding the island so it cannot become an alternate route.
+    public void ForceEnvironmentalDeath()
+    {
+        if (IsDead) return;
+        currentHealth = 0f;
+        OnHealthChanged?.Invoke(currentHealth, MaxHealth);
+        Die();
+    }
+
     public bool HasStamina(float amount = 0.1f) => currentStamina >= amount;
 
     public void SetEquipmentStaminaMultiplier(float multiplier)
@@ -537,7 +547,7 @@ public class PlayerStats : MonoBehaviour
         GameObject textObject = new GameObject("Message", typeof(RectTransform), typeof(TextMeshProUGUI));
         textObject.transform.SetParent(panel.transform, false);
         TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
-        label.text = "TE COMIÃ“ LA PESTE";
+        label.text = "TE COMI\u00d3 LA PESTE";
         label.fontSize = 42f;
         label.enableAutoSizing = true;
         label.fontSizeMin = 24f;

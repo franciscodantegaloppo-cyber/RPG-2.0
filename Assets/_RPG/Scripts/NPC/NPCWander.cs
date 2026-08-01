@@ -12,6 +12,7 @@ public class NPCWander : MonoBehaviour
     [SerializeField] float waitMin = 2.5f;
     [SerializeField] float waitMax = 5f;
     [SerializeField] float maxRadius = 5f;
+    [SerializeField, Range(0f, 1f)] float returnToSpawnChance;
     [SerializeField] float awareDistance = 2.8f;
     [SerializeField] float turnSpeed = 540f;
     [SerializeField] float terrainStickOffset = 0f;
@@ -54,6 +55,11 @@ public class NPCWander : MonoBehaviour
     bool wanderActive = true;
     Coroutine wanderRoutine;
     float externalMoveSpeed = -1f;
+    bool externalHeightControl;
+    float externalTargetY;
+    float externalVerticalSpeed = .5f;
+    float obstacleAvoidUntil;
+    Vector3 obstacleAvoidDirection;
 
     void Awake()
     {
@@ -122,9 +128,13 @@ public class NPCWander : MonoBehaviour
 
         verticalVel = cc != null && cc.isGrounded ? -2f : Mathf.Max(verticalVel + Physics.gravity.y * Time.deltaTime, -15f);
 
-        if (horizontalDir.sqrMagnitude > 0.01f)
+        Vector3 activeDirection = Time.time < obstacleAvoidUntil
+            ? obstacleAvoidDirection
+            : horizontalDir;
+
+        if (activeDirection.sqrMagnitude > 0.01f)
         {
-            Quaternion targetRotation = Quaternion.LookRotation(horizontalDir, Vector3.up);
+            Quaternion targetRotation = Quaternion.LookRotation(activeDirection, Vector3.up);
             transform.rotation = Quaternion.RotateTowards(
                 transform.rotation,
                 targetRotation,
@@ -132,7 +142,9 @@ public class NPCWander : MonoBehaviour
         }
 
         float activeMoveSpeed = externalMoveSpeed >= 0f ? externalMoveSpeed : moveSpeed;
-        Vector3 move = horizontalDir.sqrMagnitude > 0.01f ? transform.forward * activeMoveSpeed : Vector3.zero;
+        Vector3 move = activeDirection.sqrMagnitude > 0.01f
+            ? transform.forward * activeMoveSpeed
+            : Vector3.zero;
         if (useCharacterControllerMovement && cc != null && cc.enabled)
         {
             cc.Move((move + Vector3.up * verticalVel) * Time.deltaTime);
@@ -140,12 +152,22 @@ public class NPCWander : MonoBehaviour
         else
         {
             Vector3 next = transform.position + move * Time.deltaTime;
-            if (GroundUtility.TryProjectToGround(next, transform, out Vector3 grounded, 5f, 8f))
+            if (externalHeightControl)
+            {
+                next.y = Mathf.MoveTowards(transform.position.y,
+                    externalTargetY, externalVerticalSpeed * Time.deltaTime);
+                transform.position = next;
+            }
+            else if (GroundUtility.TryProjectToGround(next, transform,
+                         out Vector3 grounded, 5f, 8f))
                 transform.position = grounded;
         }
-        KeepFeetOnTerrain();
-        visualGroundAligner?.AlignNow();
-        AlignControllerFeetToGround();
+        if (!externalHeightControl)
+        {
+            KeepFeetOnTerrain();
+            visualGroundAligner?.AlignNow();
+            AlignControllerFeetToGround();
+        }
     }
 
     IEnumerator SnapVisualAfterPose()
@@ -166,25 +188,24 @@ public class NPCWander : MonoBehaviour
             return;
 
         nextSnapTime = Time.time + 0.06f;
-        // GetGroundY (not raw terrain.SampleHeight) so NPCs entering a house pick up its floor/
-        // stairs colliders instead of only ever tracking the outdoor terrain height beneath them.
-        float groundY = GroundUtility.GetGroundY(transform.position, transform);
-        if (float.IsNegativeInfinity(groundY) || !groundSnap.TryGetVisualBottomY(out float bottomY))
+        // CharacterController already follows slopes while walking. Re-snapping the root every
+        // few frames made the merchant jump onto Market_Stall colliders and look teleported.
+        if (horizontalDir.sqrMagnitude > .01f || Time.time < obstacleAvoidUntil)
+            return;
+        if (!TryGetSafeGround(transform.position, out float groundY, out _) ||
+            !groundSnap.TryGetVisualBottomY(out float bottomY))
             return;
 
         float yDelta = groundY + terrainStickOffset - bottomY;
-        if (Mathf.Abs(yDelta) <= 0.004f)
+        if (Mathf.Abs(yDelta) <= 0.004f || Mathf.Abs(yDelta) > .4f)
             return;
 
-        bool wasEnabled = cc != null && cc.enabled;
-        if (wasEnabled)
-            cc.enabled = false;
-
-        transform.position += Vector3.up * yDelta;
-
-        if (wasEnabled)
-            cc.enabled = true;
-
+        // Small, continuous correction only. Never disable/re-enable the controller in Update.
+        float correction = Mathf.Clamp(yDelta, -.045f, .045f);
+        if (cc != null && cc.enabled)
+            cc.Move(Vector3.up * correction);
+        else
+            transform.position += Vector3.up * correction;
         verticalVel = -2f;
     }
 
@@ -193,13 +214,18 @@ public class NPCWander : MonoBehaviour
         if (cc == null || !cc.enabled)
             return;
 
-        float groundY = GroundUtility.GetGroundY(transform.position, transform);
-        if (float.IsNegativeInfinity(groundY))
+        if (horizontalDir.sqrMagnitude > .01f ||
+            !TryGetSafeGround(transform.position, out float groundY, out _))
             return;
 
         Vector3 center = cc.center;
-        center.y = groundY - transform.position.y + cc.height * 0.5f + terrainStickOffset;
-        cc.center = center;
+        float targetCenterY =
+            groundY - transform.position.y + cc.height * 0.5f + terrainStickOffset;
+        if (Mathf.Abs(targetCenterY - center.y) <= .4f)
+        {
+            center.y = Mathf.MoveTowards(center.y, targetCenterY, .035f);
+            cc.center = center;
+        }
     }
 
     public void Configure(float speed, float radius, float step, float minWait, float maxWait)
@@ -209,6 +235,11 @@ public class NPCWander : MonoBehaviour
         stepDistance = Mathf.Max(0.25f, step);
         waitMin = Mathf.Max(0f, minWait);
         waitMax = Mathf.Max(waitMin, maxWait);
+    }
+
+    public void ConfigureReturnToSpawnChance(float chance)
+    {
+        returnToSpawnChance = Mathf.Clamp01(chance);
     }
 
     public void UseTransformMovement(bool value)
@@ -254,6 +285,15 @@ public class NPCWander : MonoBehaviour
 
     bool TryNextStep(out Vector3 destination)
     {
+        if (HorizontalDist(transform.position, spawnPoint) > 0.35f &&
+            Random.value < returnToSpawnChance &&
+            TryProjectWalkCandidate(spawnPoint, out Vector3 projectedSpawn) &&
+            HorizontalDist(transform.position, projectedSpawn) > 0.35f)
+        {
+            destination = projectedSpawn;
+            return true;
+        }
+
         for (int i = 0; i < 8; i++)
         {
             float angle = Random.Range(0f, 360f);
@@ -270,6 +310,8 @@ public class NPCWander : MonoBehaviour
 
             if (!TryProjectWalkCandidate(candidate, out candidate))
                 continue;
+            if (!PathIsClear(candidate))
+                continue;
 
             if (HorizontalDist(transform.position, candidate) > 0.35f)
             {
@@ -280,6 +322,53 @@ public class NPCWander : MonoBehaviour
 
         destination = transform.position;
         return false;
+    }
+
+    bool PathIsClear(Vector3 destination)
+    {
+        Vector3 delta = destination - transform.position;
+        delta.y = 0f;
+        float distance = delta.magnitude;
+        if (distance < .2f)
+            return true;
+
+        float radius = cc != null ? Mathf.Max(.18f, cc.radius * .82f) : .28f;
+        float height = cc != null ? Mathf.Max(radius * 2f, cc.height) : 1.7f;
+        Vector3 bottom = transform.position + Vector3.up * (radius + .12f);
+        Vector3 top = transform.position +
+                      Vector3.up * Mathf.Max(radius + .12f, height - radius);
+        RaycastHit[] hits = Physics.CapsuleCastAll(bottom, top, radius,
+            delta / distance, distance, ~0, QueryTriggerInteraction.Ignore);
+        foreach (RaycastHit hit in hits)
+        {
+            Collider obstacle = hit.collider;
+            if (obstacle == null || obstacle is TerrainCollider ||
+                obstacle.transform.IsChildOf(transform))
+                continue;
+            string obstacleName = obstacle.name.ToLowerInvariant();
+            if (obstacleName.Contains("walkable") ||
+                obstacleName.Contains("floor") ||
+                obstacleName.Contains("terrain"))
+                continue;
+            return false;
+        }
+        return true;
+    }
+
+    void OnControllerColliderHit(ControllerColliderHit hit)
+    {
+        if (hit.collider == null || hit.collider is TerrainCollider ||
+            hit.collider.transform.IsChildOf(transform) || hit.normal.y > .65f)
+            return;
+
+        Vector3 away = Vector3.ProjectOnPlane(hit.normal, Vector3.up);
+        if (away.sqrMagnitude < .01f)
+            away = transform.position - hit.collider.bounds.center;
+        away.y = 0f;
+        if (away.sqrMagnitude < .01f)
+            return;
+        obstacleAvoidDirection = away.normalized;
+        obstacleAvoidUntil = Time.time + .65f;
     }
 
     IEnumerator WalkStep(Vector3 dest)
@@ -415,32 +504,90 @@ public class NPCWander : MonoBehaviour
     {
         projected = candidate;
 
-        if (!GroundUtility.TryGetGround(candidate, transform, out var candidateGround, 5f, 8f))
+        if (!TryGetSafeGround(candidate, out float candidateY,
+                out Collider candidateCollider))
             return false;
-        if (!GroundUtility.TryGetGround(transform.position, transform, out var currentGround, 5f, 8f))
+        if (!TryGetSafeGround(transform.position, out float currentY,
+                out Collider currentCollider))
             return false;
 
-        float delta = candidateGround.y - currentGround.y;
+        float delta = candidateY - currentY;
         if (delta > maxSurfaceStepHeight)
             return false;
 
-        bool currentlyOnInterior = currentGround.collider != null && !(currentGround.collider is TerrainCollider);
-        bool candidateOnTerrain = candidateGround.IsTerrain;
-        if (spawnSurface != null && candidateOnTerrain)
+        bool currentlyOnInterior = currentCollider != null &&
+                                   !(currentCollider is TerrainCollider);
+        bool candidateOnTerrain = candidateCollider is TerrainCollider;
+        if (spawnSurface != null && !(spawnSurface is TerrainCollider) &&
+            candidateOnTerrain)
             return false;
         if (currentlyOnInterior && candidateOnTerrain && delta < -maxDropFromInterior)
             return false;
 
-        if (spawnSurface != null && !SameWalkableArea(spawnSurface, candidateGround.collider))
+        if (spawnSurface != null &&
+            !SameWalkableArea(spawnSurface, candidateCollider))
             return false;
 
-        projected.y = candidateGround.y;
+        projected.y = candidateY;
         return true;
     }
 
     Collider GetCurrentGroundSurface()
     {
-        return GroundUtility.TryGetGround(transform.position, transform, out var ground, 5f, 8f) ? ground.collider : null;
+        return TryGetSafeGround(transform.position, out _, out Collider surface)
+            ? surface
+            : null;
+    }
+
+    bool TryGetSafeGround(Vector3 position, out float groundY,
+        out Collider groundCollider)
+    {
+        if (GroundUtility.TryGetGround(position, transform, out var ground, 5f, 8f) &&
+            !IsMarketObstacle(ground.collider))
+        {
+            groundY = ground.y;
+            groundCollider = ground.collider;
+            return true;
+        }
+
+        // Market stalls, counters and decorative roofs are obstacles, never walkable floors.
+        // Falling back to the terrain below prevents the controller from snapping on top of one.
+        foreach (Terrain terrain in Terrain.activeTerrains)
+        {
+            if (terrain == null || terrain.terrainData == null)
+                continue;
+            Vector3 local = position - terrain.transform.position;
+            Vector3 size = terrain.terrainData.size;
+            if (local.x < 0f || local.z < 0f ||
+                local.x > size.x || local.z > size.z)
+                continue;
+            groundY = terrain.SampleHeight(position) + terrain.transform.position.y;
+            groundCollider = terrain.GetComponent<TerrainCollider>();
+            return true;
+        }
+
+        groundY = float.NegativeInfinity;
+        groundCollider = null;
+        return false;
+    }
+
+    public bool TryGetSafeGroundY(Vector3 position, out float groundY)
+    {
+        return TryGetSafeGround(position, out groundY, out _);
+    }
+
+    static bool IsMarketObstacle(Collider collider)
+    {
+        Transform current = collider != null ? collider.transform : null;
+        while (current != null)
+        {
+            string lower = current.name.ToLowerInvariant();
+            if (lower.Contains("market_stall") || lower.Contains("marketstall") ||
+                lower.Contains("medieval_market_staging"))
+                return true;
+            current = current.parent;
+        }
+        return false;
     }
 
     static bool SameWalkableArea(Collider a, Collider b)
@@ -477,10 +624,30 @@ public class NPCWander : MonoBehaviour
 
     public void MoveForCombat(Vector3 direction, float speed)
     {
+        EndExternalHeightControl();
         direction.y = 0f;
         horizontalDir = direction.sqrMagnitude > 0.001f ? direction.normalized : Vector3.zero;
         externalMoveSpeed = Mathf.Max(0.2f, speed);
         SetAnim(horizontalDir.sqrMagnitude > 0.001f);
+    }
+
+    public void MoveForRoute(Vector3 direction, float speed,
+        float targetY, float verticalSpeed)
+    {
+        if (!externalHeightControl)
+        {
+            externalHeightControl = true;
+            if (visualGroundAligner != null)
+                visualGroundAligner.enabled = false;
+        }
+        direction.y = 0f;
+        horizontalDir = direction.sqrMagnitude > 0.001f
+            ? direction.normalized
+            : Vector3.zero;
+        externalMoveSpeed = Mathf.Max(.2f, speed);
+        externalTargetY = targetY;
+        externalVerticalSpeed = Mathf.Max(.1f, verticalSpeed);
+        SetAnim(horizontalDir.sqrMagnitude > .001f);
     }
 
     public void StopCombatMove()
@@ -488,6 +655,19 @@ public class NPCWander : MonoBehaviour
         horizontalDir = Vector3.zero;
         externalMoveSpeed = -1f;
         SetAnim(false);
+        EndExternalHeightControl();
+    }
+
+    void EndExternalHeightControl()
+    {
+        if (!externalHeightControl)
+            return;
+        externalHeightControl = false;
+        if (visualGroundAligner != null)
+        {
+            visualGroundAligner.enabled = true;
+            visualGroundAligner.AlignNow();
+        }
     }
 
     public void ResumeWander()

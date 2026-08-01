@@ -175,67 +175,39 @@ public class HUDController : MonoBehaviour
 
     void UpdateDayNightClock()
     {
-        if (dayNightCycle == null) dayNightCycle = FindAnyObjectByType<TenkokuDayNightCycle>();
-        if (dayNightCycle == null) return;
-        EnsureDayNightClock();
-        if (dayNightLabel == null) return;
-        float hour = dayNightCycle.CurrentHour;
-        int wholeHour = Mathf.FloorToInt(hour);
-        int minutes = Mathf.FloorToInt((hour - wholeHour) * 60f);
-        bool pm = wholeHour >= 12;
-        int displayHour = wholeHour % 12;
-        if (displayHour == 0) displayHour = 12;
-        dayNightLabel.text = "DÍA " + (dayNightCycle.WorldDay + 1) + "  ·  " + displayHour.ToString("00") + ":" + minutes.ToString("00") + (pm ? " PM" : " AM");
+        // The clock now owns a persistent overlay so scene HUD replacement cannot erase it.
+        DayNightClockHUD.EnsureForScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
     }
 
     void EnsureDayNightClock()
     {
         if (dayNightPanel != null) return;
-        RectTransform windRect = windSlider != null
-            ? windSlider.GetComponent<RectTransform>()
-            : null;
-        Transform clockParent = windRect != null && windRect.parent != null
-            ? windRect.parent
-            : null;
-        if (clockParent == null)
+        Canvas hudCanvas = GetComponentInParent<Canvas>();
+        if (hudCanvas == null || hudCanvas.renderMode == RenderMode.WorldSpace)
         {
-            Canvas hudCanvas = GetComponentInParent<Canvas>();
-            if (hudCanvas == null)
+            foreach (Canvas candidate in
+                     FindObjectsByType<Canvas>(FindObjectsInactive.Include))
             {
-                foreach (Canvas candidate in
-                         FindObjectsByType<Canvas>(FindObjectsInactive.Include))
+                if (candidate != null &&
+                    candidate.renderMode != RenderMode.WorldSpace &&
+                    candidate.gameObject.activeInHierarchy)
                 {
-                    if (candidate != null &&
-                        candidate.renderMode != RenderMode.WorldSpace &&
-                        candidate.gameObject.activeInHierarchy)
-                    {
-                        hudCanvas = candidate;
-                        break;
-                    }
+                    hudCanvas = candidate;
+                    break;
                 }
             }
-            clockParent = hudCanvas != null ? hudCanvas.transform : transform;
         }
+        Transform clockParent = hudCanvas != null ? hudCanvas.transform : transform;
         dayNightPanel = new GameObject("DayNightClockMU", typeof(RectTransform), typeof(Image));
         dayNightPanel.transform.SetParent(clockParent, false);
         RectTransform rect = dayNightPanel.GetComponent<RectTransform>();
-        if (windRect != null)
-        {
-            rect.anchorMin = windRect.anchorMin;
-            rect.anchorMax = windRect.anchorMax;
-            rect.pivot = new Vector2(.5f, 1f);
-            rect.anchoredPosition =
-                windRect.anchoredPosition + new Vector2(-115f, -38f);
-        }
-        else
-        {
-            // SharpUI can rebuild the HUD without the old serialized wind slider. Keep the
-            // clock independently visible instead of silently skipping its creation.
-            rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
-            rect.pivot = Vector2.one;
-            rect.anchoredPosition = new Vector2(-270f, -126f);
-        }
-        rect.sizeDelta = new Vector2(235f, 34f);
+        // A masked/layout-controlled wind parent could crop the entire clock. Keep it on
+        // the root screen canvas with a stable top-right position instead.
+        rect.anchorMin = rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = Vector2.one;
+        rect.anchoredPosition = new Vector2(-24f, -118f);
+        rect.sizeDelta = new Vector2(292f, 38f);
+        dayNightPanel.transform.SetAsLastSibling();
         Image background = dayNightPanel.GetComponent<Image>();
         Sprite frame = Resources.Load<Sprite>("UI/SharpUI/Panel");
         if (frame != null) { background.sprite = frame; background.type = Image.Type.Sliced; background.color = Color.white; }

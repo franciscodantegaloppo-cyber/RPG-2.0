@@ -260,15 +260,15 @@ public class NahueQuestGiver : MonoBehaviour, IInteractable
     void ShowSecondPrimaryDialogue(MerchantDialoguePanel panel, QuestManager quests)
     {
         panel.Show(npcName,
-            "Â¿Sabes lo que estoy viviendo? Â¿Lo que es tener la mirada perdida? Â¿Que la vida misma se presente ante mis ojos y de mÃ­ no exista respuesta?",
+            "\u00bfSabes lo que estoy viviendo? \u00bfLo que es tener la mirada perdida? \u00bfQue la vida misma se presente ante mis ojos y de m\u00ed no exista respuesta?",
             "Siguiente", () => panel.Show("Frank",
-                "El enclaustramiento mental puede tener muchÃ­simas etiologÃ­as. Pero todas comparten un mismo desenlace: la realidad deja de ser un hogar y se convierte en un eco. Los dÃ­as pasan, las personas hablan, el viento mueve los Ã¡rboles... y uno observa todo como si perteneciera a otro mundo. No porque el mundo haya cambiado, sino porque algo dentro de uno dejÃ³ de responder a su llamado.",
+                "El enclaustramiento mental puede tener much\u00edsimas etiolog\u00edas. Pero todas comparten un mismo desenlace: la realidad deja de ser un hogar y se convierte en un eco. Los d\u00edas pasan, las personas hablan, el viento mueve los \u00e1rboles... y uno observa todo como si perteneciera a otro mundo. No porque el mundo haya cambiado, sino porque algo dentro de uno dej\u00f3 de responder a su llamado.",
                 "Siguiente", () => panel.Show(npcName,
-                    "Blablabla... Por otro lado, Â¿por quÃ© hablas demasiado con Tonio? TÃº no conoces a Tonio. Es un dios en lamento. No porque gobierne sobre los hombres, sino porque carga un peso que ningÃºn hombre deberÃ­a soportar. Â¡El peso del dinero, jajaja! Necesito un favor de ti; si quieres, puedes persuadirlo para obtener un pedazo de la torta... al menos...",
+                    "Blablabla... Por otro lado, \u00bfpor qu\u00e9 hablas demasiado con Tonio? T\u00fa no conoces a Tonio. Es un dios en lamento. No porque gobierne sobre los hombres, sino porque carga un peso que ning\u00fan hombre deber\u00eda soportar. \u00a1El peso del dinero, jajaja! Necesito un favor de ti; si quieres, puedes persuadirlo para obtener un pedazo de la torta... al menos...",
                     "Siguiente", () => panel.Show("Frank",
-                        "Realmente, quiÃ©n te entiende...",
+                        "Realmente, qui\u00e9n te entiende...",
                         "Siguiente", () => panel.Show(npcName,
-                            "Â¿TÃº no eras el mÃ©dico?",
+                            "\u00bfT\u00fa no eras el m\u00e9dico?",
                             "Siguiente", () => panel.Show("Frank", "...", "Hablar con Tonio", () =>
                             {
                                 quests.CompleteNahueSecondDialogue();

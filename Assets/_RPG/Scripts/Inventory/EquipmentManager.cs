@@ -73,7 +73,9 @@ public class EquipmentManager : MonoBehaviour
         {
             weaponSocket?.AttachWeapon(item.weaponData.weaponPrefab, item.weaponData);
             weaponSocket?.ApplyItemInstanceVisual(instance);
-            animBridge?.SetWeaponType((int)item.weaponData.weaponType);
+            // Newly equipped weapons start visibly sheathed on the back. The
+            // threat-awareness system draws them automatically when needed.
+            weaponDrawSystem?.OnWeaponEquipped();
 
             // Apply animator override if present
             if (item.weaponData.animatorOverride != null)

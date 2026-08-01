@@ -29,7 +29,53 @@ public class MerchantDialoguePanel : MonoBehaviour
     void Awake()
     {
         Instance = this;
+        ApplyReadableTypography();
         if (panel != null) panel.SetActive(false);
+    }
+
+    void ApplyReadableTypography()
+    {
+        if (panel != null && panel.transform is RectTransform panelRect)
+        {
+            panelRect.anchorMin = new Vector2(.08f, .055f);
+            panelRect.anchorMax = new Vector2(.92f, .44f);
+            panelRect.offsetMin = Vector2.zero;
+            panelRect.offsetMax = Vector2.zero;
+        }
+        if (nameText != null)
+        {
+            nameText.fontSize = 20f;
+            nameText.enableAutoSizing = true;
+            nameText.fontSizeMin = 17f;
+            nameText.fontSizeMax = 20f;
+            nameText.characterSpacing = .3f;
+            nameText.overflowMode = TextOverflowModes.Ellipsis;
+        }
+        if (bodyText != null)
+        {
+            bodyText.fontSize = 18f;
+            bodyText.enableAutoSizing = true;
+            bodyText.fontSizeMin = 14f;
+            bodyText.fontSizeMax = 18f;
+            bodyText.characterSpacing = .15f;
+            bodyText.lineSpacing = 6f;
+            bodyText.textWrappingMode = TextWrappingModes.Normal;
+            bodyText.overflowMode = TextOverflowModes.Overflow;
+            bodyText.margin = new Vector4(10f, 5f, 10f, 5f);
+        }
+        ConfigureButtonLabel(acceptLabel);
+        ConfigureButtonLabel(secondaryLabel);
+    }
+
+    static void ConfigureButtonLabel(TextMeshProUGUI text)
+    {
+        if (text == null) return;
+        text.fontSize = 16f;
+        text.enableAutoSizing = true;
+        text.fontSizeMin = 12f;
+        text.fontSizeMax = 16f;
+        text.characterSpacing = .25f;
+        text.overflowMode = TextOverflowModes.Ellipsis;
     }
 
     void Update()
@@ -116,10 +162,10 @@ public class MerchantDialoguePanel : MonoBehaviour
         nameRect.offsetMin = Vector2.zero;
         nameRect.offsetMax = Vector2.zero;
         TextMeshProUGUI nameTmp = nameGo.AddComponent<TextMeshProUGUI>();
-        nameTmp.fontSize = 18;
+        nameTmp.fontSize = 20;
         nameTmp.enableAutoSizing = true;
-        nameTmp.fontSizeMin = 10f;
-        nameTmp.fontSizeMax = 18f;
+        nameTmp.fontSizeMin = 17f;
+        nameTmp.fontSizeMax = 20f;
         nameTmp.fontStyle = FontStyles.Bold;
         nameTmp.color = new Color(1f, 0.85f, 0.4f);
 
@@ -131,12 +177,14 @@ public class MerchantDialoguePanel : MonoBehaviour
         bodyRect.offsetMin = Vector2.zero;
         bodyRect.offsetMax = Vector2.zero;
         TextMeshProUGUI bodyTmp = bodyGo.AddComponent<TextMeshProUGUI>();
-        bodyTmp.fontSize = 15;
+        bodyTmp.fontSize = 18;
         bodyTmp.enableAutoSizing = true;
-        bodyTmp.fontSizeMin = 9f;
-        bodyTmp.fontSizeMax = 15f;
+        bodyTmp.fontSizeMin = 14f;
+        bodyTmp.fontSizeMax = 18f;
         bodyTmp.color = Color.white;
         bodyTmp.textWrappingMode = TextWrappingModes.Normal;
+        bodyTmp.lineSpacing = 6f;
+        bodyTmp.margin = new Vector4(10f, 5f, 10f, 5f);
 
         Button btn = CreateMuButton(panelGo.transform, "AcceptButton", new Vector2(0.10f, 0.15f), new Vector2(0.90f, 0.29f), out TextMeshProUGUI lblTmp);
         Button secondBtn = CreateMuButton(panelGo.transform, "SecondaryButton", new Vector2(0.10f, 0.02f), new Vector2(0.90f, 0.14f), out TextMeshProUGUI secondLblTmp);
@@ -176,10 +224,10 @@ public class MerchantDialoguePanel : MonoBehaviour
             labelRect.offsetMax = new Vector2(-12f, -6f);
             label = labelGo.AddComponent<TextMeshProUGUI>();
         }
-        label.fontSize = 14;
+        label.fontSize = 16;
         label.enableAutoSizing = true;
-        label.fontSizeMin = 8f;
-        label.fontSizeMax = 14f;
+        label.fontSizeMin = 12f;
+        label.fontSizeMax = 16f;
         label.alignment = TextAlignmentOptions.Center;
         label.color = Color.white;
         return button;
@@ -187,6 +235,7 @@ public class MerchantDialoguePanel : MonoBehaviour
 
     public void Show(string speakerName, string message, string buttonLabel, Action onAcceptCallback)
     {
+        ApplyReadableTypography();
         onAccept = onAcceptCallback;
         fullMessage = message ?? "";
         presentingChoices = false;
@@ -213,6 +262,7 @@ public class MerchantDialoguePanel : MonoBehaviour
 
     public void ShowChoices(string speakerName, string message, string primaryLabel, Action primaryCallback, string secondaryText, Action secondaryCallback)
     {
+        ApplyReadableTypography();
         onAccept = primaryCallback;
         onSecondary = secondaryCallback;
         fullMessage = message ?? "";

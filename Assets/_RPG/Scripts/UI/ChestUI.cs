@@ -110,6 +110,8 @@ public class ChestUI : MonoBehaviour
     public bool IsOpen { get; private set; }
     public static bool IsAnyOpen => _instance != null && _instance.IsOpen;
     float openedAt;
+    int refreshBatchDepth;
+    bool refreshQueued;
     static Sprite muPanelFrame;
     static Sprite muBannerFrame;
 
@@ -151,15 +153,18 @@ public class ChestUI : MonoBehaviour
         BuildIfNeeded();
         titleText.text = chest.ChestName;
 
-        currentChest.OnChanged += Refresh;
+        currentChest.OnChanged += RequestRefresh;
         if (InventoryManager.Instance != null)
-            InventoryManager.Instance.OnInventoryChanged += Refresh;
+            InventoryManager.Instance.OnInventoryChanged += RequestRefresh;
 
+        ResetPanelPlacement();
         panel.SetActive(true);
         panel.transform.SetAsLastSibling();
         IsOpen = true;
         openedAt = Time.unscaledTime;
         Refresh();
+        Canvas.ForceUpdateCanvases();
+        panel.GetComponent<AdaptiveUIWindowLayout>()?.FitNow();
         GameManager.Instance?.PauseGameplay();
         ReleaseCursor();
     }
@@ -169,9 +174,9 @@ public class ChestUI : MonoBehaviour
         if (!IsOpen) return;
 
         if (currentChest != null)
-            currentChest.OnChanged -= Refresh;
+            currentChest.OnChanged -= RequestRefresh;
         if (InventoryManager.Instance != null)
-            InventoryManager.Instance.OnInventoryChanged -= Refresh;
+            InventoryManager.Instance.OnInventoryChanged -= RequestRefresh;
 
         currentChest = null;
         panel?.SetActive(false);
@@ -382,6 +387,37 @@ public class ChestUI : MonoBehaviour
         }
     }
 
+    void RequestRefresh()
+    {
+        if (refreshBatchDepth > 0)
+        {
+            refreshQueued = true;
+            return;
+        }
+        Refresh();
+    }
+
+    void BeginRefreshBatch() => refreshBatchDepth++;
+
+    void EndRefreshBatch()
+    {
+        refreshBatchDepth = Mathf.Max(0, refreshBatchDepth - 1);
+        if (refreshBatchDepth != 0 || !refreshQueued) return;
+        refreshQueued = false;
+        Refresh();
+    }
+
+    void ResetPanelPlacement()
+    {
+        RectTransform rect = panel != null ? panel.GetComponent<RectTransform>() : null;
+        if (rect == null) return;
+        rect.anchorMin = new Vector2(.02f, .03f);
+        rect.anchorMax = new Vector2(.98f, .97f);
+        rect.offsetMin = Vector2.zero;
+        rect.offsetMax = Vector2.zero;
+        rect.localScale = Vector3.one;
+    }
+
     void CreateSlot(Transform parent, InventorySlot slot, bool isChestSlot, int slotIndex)
     {
         ItemData item = slot?.item;
@@ -499,26 +535,29 @@ public class ChestUI : MonoBehaviour
     {
         if (slot?.item == null) return;
 
-        if (fromChest)
+        BeginRefreshBatch();
+        try
         {
-            if (currentChest == null) return;
-            bool added = slot.instance != null
-                ? InventoryManager.Instance != null && InventoryManager.Instance.AddItemInstance(slot.instance)
-                : InventoryManager.Instance != null && InventoryManager.Instance.AddItem(slot.item, slot.quantity);
-            if (!added) return;
-            currentChest.RemoveSlot(slot);
+            if (fromChest)
+            {
+                if (currentChest == null) return;
+                bool added = slot.instance != null
+                    ? InventoryManager.Instance != null && InventoryManager.Instance.AddItemInstance(slot.instance)
+                    : InventoryManager.Instance != null && InventoryManager.Instance.AddItem(slot.item, slot.quantity);
+                if (!added) return;
+                currentChest.RemoveSlot(slot);
+            }
+            else
+            {
+                if (currentChest == null || !currentChest.HasRoom && slot.instance == null) return;
+                bool added = slot.instance != null
+                    ? currentChest.TryAddInstance(slot.instance)
+                    : currentChest.TryAddItem(slot.item, slot.quantity);
+                if (!added) return;
+                InventoryManager.Instance?.RemoveSlot(slot);
+            }
         }
-        else
-        {
-            if (currentChest == null || !currentChest.HasRoom && slot.instance == null) return;
-            bool added = slot.instance != null
-                ? currentChest.TryAddInstance(slot.instance)
-                : currentChest.TryAddItem(slot.item, slot.quantity);
-            if (!added) return;
-            InventoryManager.Instance?.RemoveSlot(slot);
-        }
-
-        Refresh();
+        finally { EndRefreshBatch(); }
     }
 
     public void HandleDrop(Object sourceHandler, ChestSlotHandler target)
@@ -526,35 +565,38 @@ public class ChestUI : MonoBehaviour
         if (target == null)
             return;
 
-        if (sourceHandler is ChestSlotHandler chestSource)
+        BeginRefreshBatch();
+        try
         {
-            if (chestSource.Slot == null || chestSource == target)
-                return;
-
-            if (chestSource.IsChestSlot == target.IsChestSlot)
+            if (sourceHandler is ChestSlotHandler chestSource)
             {
-                if (target.IsChestSlot)
-                    currentChest?.MoveSlotToIndex(chestSource.Slot, target.SlotIndex);
+                if (chestSource.Slot == null || chestSource == target)
+                    return;
+
+                if (chestSource.IsChestSlot == target.IsChestSlot)
+                {
+                    if (target.IsChestSlot)
+                        currentChest?.MoveSlotToIndex(chestSource.Slot, target.SlotIndex);
+                    else
+                        InventoryManager.Instance?.MoveSlotToIndex(chestSource.Slot, target.SlotIndex);
+                }
                 else
-                    InventoryManager.Instance?.MoveSlotToIndex(chestSource.Slot, target.SlotIndex);
+                {
+                    Transfer(chestSource.Slot, chestSource.IsChestSlot);
+                }
             }
-            else
+            else if (sourceHandler is InventorySlotHandler invSource)
             {
-                Transfer(chestSource.Slot, chestSource.IsChestSlot);
+                if (invSource.BagSlot == null)
+                    return;
+
+                if (target.IsChestSlot)
+                    Transfer(invSource.BagSlot, false);
+                else
+                    InventoryManager.Instance?.MoveSlotToIndex(invSource.BagSlot, target.SlotIndex);
             }
         }
-        else if (sourceHandler is InventorySlotHandler invSource)
-        {
-            if (invSource.BagSlot == null)
-                return;
-
-            if (target.IsChestSlot)
-                Transfer(invSource.BagSlot, false);
-            else
-                InventoryManager.Instance?.MoveSlotToIndex(invSource.BagSlot, target.SlotIndex);
-        }
-
-        Refresh();
+        finally { EndRefreshBatch(); }
     }
 
     static void EnsureEventSystem()
@@ -571,7 +613,11 @@ public class ChestUI : MonoBehaviour
     {
         if (parent == null) return;
         for (int i = parent.childCount - 1; i >= 0; i--)
-            Destroy(parent.GetChild(i).gameObject);
+        {
+            GameObject child = parent.GetChild(i).gameObject;
+            child.SetActive(false);
+            Destroy(child);
+        }
     }
 }
 
